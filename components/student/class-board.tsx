@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api, usePoll, ApiError } from "@/lib/client/api";
 import { EntryBody, TagBadge, Spinner, ErrorBox, Empty, useToast, type TableData } from "@/components/ui";
 import { AiView, type AiContent } from "@/components/ai-view";
+import type { PeerReaction } from "@/lib/constants";
 
 interface ClassResp {
   anonymised: boolean;
@@ -15,6 +16,8 @@ interface ClassResp {
     body: string;
     hasImage: boolean;
     table: TableData | null;
+    canReact: boolean;
+    reactions: { like: number; heart: number; mine: PeerReaction | null };
     critiques: { id: number; promptLabel: string; body: string; mine: boolean; authorLabel: string }[];
   }[];
   ai: { id: number; kind: string; part: number; content: AiContent }[];
@@ -22,7 +25,7 @@ interface ClassResp {
 }
 
 export function ClassBoard() {
-  const { data, error, loading, refresh } = usePoll<ClassResp>("/student/class", 5000);
+  const { data, error, loading, refresh, setData } = usePoll<ClassResp>("/student/class", 5000);
   if (loading && !data) return <Spinner />;
   if (error && !data) return <ErrorBox message={error.message} onRetry={refresh} />;
   if (!data) return null;
@@ -68,7 +71,9 @@ export function ClassBoard() {
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
             {data.shares.map((s) => (
-              <ShareCard key={s.shareId} s={s} prompts={data.prompts} onChanged={refresh} />
+              <ShareCard key={s.shareId} s={s} prompts={data.prompts} onChanged={refresh} onReaction={(reactions) => {
+                setData((current) => current && { ...current, shares: current.shares.map((item) => item.shareId === s.shareId ? { ...item, reactions } : item) });
+              }} />
             ))}
           </div>
         )}
@@ -77,12 +82,29 @@ export function ClassBoard() {
   );
 }
 
-function ShareCard({ s, prompts, onChanged }: { s: ClassResp["shares"][number]; prompts: ClassResp["prompts"]; onChanged: () => void }) {
+function ShareCard({ s, prompts, onChanged, onReaction }: {
+  s: ClassResp["shares"][number]; prompts: ClassResp["prompts"]; onChanged: () => void;
+  onReaction: (r: ClassResp["shares"][number]["reactions"]) => void;
+}) {
   const toast = useToast();
   const [selectedKey, setSelectedKey] = useState("");
   const key = prompts.some((p) => p.key === selectedKey) ? selectedKey : prompts[0]?.key ?? "";
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reacting, setReacting] = useState(false);
+  async function react(reaction: PeerReaction) {
+    setReacting(true);
+    try {
+      const result = await api<{ reactions: typeof s.reactions }>("PUT", `/student/shares/${s.shareId}/reaction`, {
+        reaction: s.reactions.mine === reaction ? null : reaction,
+      });
+      onReaction(result.reactions);
+    } catch (e) {
+      toast((e as ApiError).message, "err");
+    } finally {
+      setReacting(false);
+    }
+  }
   async function post() {
     setBusy(true);
     try {
@@ -106,6 +128,16 @@ function ShareCard({ s, prompts, onChanged }: { s: ClassResp["shares"][number]; 
         </div>
       </div>
       <EntryBody body={s.body} hasImage={s.hasImage} entryId={s.entryId} table={s.table} />
+      {s.canReact ? (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Reactions">
+          {(["like", "heart"] as const).map((reaction) => (
+            <button key={reaction} type="button" className={`btn-ghost min-h-11 ${s.reactions.mine === reaction ? "bg-violet-100 text-violet-900" : ""}`}
+              aria-pressed={s.reactions.mine === reaction} disabled={reacting} onClick={() => react(reaction)}>
+              {reaction === "like" ? "Like" : "Heart"} <span className="tabular-nums">{s.reactions[reaction]}</span>
+            </button>
+          ))}
+        </div>
+      ) : <p className="text-xs text-slate-600">Likes: {s.reactions.like} · Hearts: {s.reactions.heart}</p>}
       <div className="border-t border-slate-100 pt-3">
         {s.critiques.length > 0 && (
           <ul className="mb-3 space-y-2">

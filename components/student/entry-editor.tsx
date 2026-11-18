@@ -1,7 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/client/api";
-import { TAGS } from "@/lib/constants";
 import { TagBadge, type TableData } from "@/components/ui";
 import type { Entry, SaveStatus } from "./types";
 
@@ -66,6 +65,7 @@ async function prepareImage(file: File): Promise<string> {
 
 interface Props {
   part: number;
+  entryTags: readonly string[];
   studentId: number;
   entry: Entry | null; // null = brand-new, not yet on the server
   draftKey: string;
@@ -76,7 +76,7 @@ interface Props {
   onEditing: (key: string, editing: boolean, entryId: number | null) => void;
 }
 
-export function EntryEditor({ part, studentId, entry, draftKey, readOnly, onSaved, onDeleted, onStatus, onEditing }: Props) {
+export function EntryEditor({ part, entryTags, studentId, entry, draftKey, readOnly, onSaved, onDeleted, onStatus, onEditing }: Props) {
   const storeKey = `si:${studentId}:p${part}:${draftKey}`;
   const initial = useRef<Draft | null>(ls.get(storeKey));
   const [tag, setTag] = useState<string | null>(initial.current ? initial.current.tag : entry?.tag ?? null);
@@ -297,7 +297,8 @@ export function EntryEditor({ part, studentId, entry, draftKey, readOnly, onSave
           </label>
           <select id={`tag-${draftKey}`} className="input max-w-xs" value={tag ?? ""} onChange={(e) => { const v = e.target.value || null; setTag(v); latest.current.tag = v; schedule(300); }}>
             <option value="">No tag</option>
-            {TAGS.map((t) => (
+            {tag && !entryTags.includes(tag) && <option value={tag}>{tag} (previous tag)</option>}
+            {entryTags.map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>

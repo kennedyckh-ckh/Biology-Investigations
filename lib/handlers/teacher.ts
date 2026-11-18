@@ -1,10 +1,11 @@
 import { route, bad, forbidden, notFound, HttpError, str, int, partNo, safeLink } from "../router";
 import { all, get, run, tx, now, num, audit, type Row } from "../db";
 import { requireTeacher, ownSession, ownGroup, mustBeActive, submissionInfo, onlineEditors } from "../authz";
-import { createSession, partConfig, setQuestions, activeGroupIds } from "../sessions";
+import { createSession, partConfig, setQuestions, activeGroupIds, entryTagsFor } from "../sessions";
 import { entriesWhere, deleteImageFile } from "../entries";
-import { publishedShares, publishedAi, critiquePromptsOf } from "../sharing";
+import { publishedShares, publishedAi, critiquePromptsOf, reactionsFor } from "../sharing";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS, DEFAULT_CRITIQUE_PROMPTS } from "../constants";
+import { attachmentInfo, attachmentRow, downloadInstructionFile, receiveInstructionFile, removeInstructionFile, uploadsInProgress } from "../instruction-files";
 
 /* ---------- Sessions list / create ---------- */
 route("GET", "/teacher/sessions", (ctx) => {
@@ -81,6 +82,7 @@ function sessionDetail(s: Row) {
     status: s.status,
     anonymiseSharing: !!num(s.anonymise_sharing),
     critiquePrompts: critiquePromptsOf(s),
+    entryTags: entryTagsFor(sid),
     aiCriteria: s.ai_criteria,
     pedagogyNotes: s.pedagogy_notes,
     source: s.source_template_id ? { templateId: num(s.source_template_id), title: src?.title ?? "(removed)", importedVersion: num(s.source_version), currentVersion: src ? num(src.version) : null } : null,
@@ -102,6 +104,16 @@ route("PATCH", "/teacher/sessions/:id", (ctx) => {
   mustBeActive(s);
   const b = ctx.body || {};
   const sid = num(s.id);
+  let tags: string[] | undefined;
+  if ("entryTags" in b) {
+    if (!Array.isArray(b.entryTags) || b.entryTags.length > LIMITS.entryTagCount) {
+      throw bad(`Use up to ${LIMITS.entryTagCount} entry tags.`);
+    }
+    const proposed = (b.entryTags as unknown[]).map((v) => str(v, LIMITS.entryTagMax, "Entry tag"));
+    if (proposed.some((tag) => /[\r\n]/.test(tag))) throw bad("Use one line for each tag.");
+    if (new Set(proposed.map((tag) => tag.toLowerCase())).size !== proposed.length) throw bad("Entry tags must be unique.");
+    tags = proposed;
+  }
   let promptsJson: string | undefined;
   if ("critiquePrompts" in b) {
     if (!Array.isArray(b.critiquePrompts)) throw bad("Invalid critique prompts");
@@ -124,6 +136,9 @@ route("PATCH", "/teacher/sessions/:id", (ctx) => {
   if ("anonymiseSharing" in b) run("UPDATE sessions SET anonymise_sharing=? WHERE id=?", b.anonymiseSharing ? 1 : 0, sid);
   if ("aiCriteria" in b) run("UPDATE sessions SET ai_criteria=? WHERE id=?", str(b.aiCriteria, 2000, "AI criteria", { optional: true }), sid);
   if (promptsJson !== undefined) run("UPDATE sessions SET critique_prompts_json=? WHERE id=?", promptsJson, sid);
+  if (tags !== undefined) {
+    run("INSERT INTO session_entry_tags(session_id,tags_json) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET tags_json=excluded.tags_json", sid, JSON.stringify(tags));
+  }
   audit("staff", ctx.auth.staff!.id, "session.update", `session:${sid}`);
   return sessionDetail(ownSession(ctx, sid));
 });
@@ -143,6 +158,50 @@ route("PUT", "/teacher/sessions/:id/parts/:n", (ctx) => {
     setQuestions(num(s.id), part, qs);
   });
   return { parts: partConfig(num(s.id)) };
+});
+
+const attachmentPath = "/teacher/sessions/:id/parts/:n/attachment";
+route("GET", attachmentPath, (ctx) => {
+  const sid = num(ownSession(ctx, ctx.params.id).id);
+  return downloadInstructionFile(attachmentRow(sid, partNo(ctx.params.n)));
+});
+route("PUT", attachmentPath, async (ctx) => {
+  const s = ownSession(ctx, ctx.params.id);
+  mustBeActive(s);
+  const sid = num(s.id);
+  const part = partNo(ctx.params.n);
+  const key = `${sid}:${part}`;
+  if (uploadsInProgress.has(key)) throw new HttpError(409, "upload_in_progress", "A file is already being uploaded to this task.");
+  uploadsInProgress.add(key);
+  try {
+    const file = await receiveInstructionFile(ctx.req);
+    try {
+      mustBeActive(ownSession(ctx, sid));
+      const old = attachmentRow(sid, part);
+      run(
+        "INSERT INTO instruction_attachments(session_id,part,storage_name,name,size) VALUES(?,?,?,?,?) ON CONFLICT(session_id,part) DO UPDATE SET storage_name=excluded.storage_name,name=excluded.name,size=excluded.size",
+        sid, part, file.storageName, file.name, file.size
+      );
+      if (old) removeInstructionFile(String(old.storage_name));
+    } catch (error) {
+      removeInstructionFile(file.storageName);
+      throw error;
+    }
+    return { attachment: attachmentInfo(sid, part, true) };
+  } finally {
+    uploadsInProgress.delete(key);
+  }
+}, { binary: true });
+route("DELETE", attachmentPath, (ctx) => {
+  const s = ownSession(ctx, ctx.params.id);
+  mustBeActive(s);
+  const sid = num(s.id);
+  const part = partNo(ctx.params.n);
+  if (uploadsInProgress.has(`${sid}:${part}`)) throw new HttpError(409, "upload_in_progress", "Wait for the upload to finish before removing the file.");
+  const old = attachmentRow(sid, part);
+  run("DELETE FROM instruction_attachments WHERE session_id=? AND part=?", sid, part);
+  if (old) removeInstructionFile(String(old.storage_name));
+  return { attachment: null };
 });
 
 /* Visibility: hidden | visible (shown but locked) | open. Opening Part 2/3 checks the previous part. */
@@ -190,8 +249,10 @@ route("DELETE", "/teacher/sessions/:id", (ctx) => {
   if (s.status !== "archived") throw forbidden("Archive the session first; only archived sessions can be deleted.", "not_archived");
   if (ctx.body?.confirmTitle !== s.title) throw bad("Type the session title to confirm deletion.", "confirm_required");
   const files = all("SELECT image_file FROM entries WHERE session_id=? AND image_file IS NOT NULL", num(s.id));
+  const attachments = all("SELECT storage_name FROM instruction_attachments WHERE session_id=?", num(s.id));
   tx(() => run("DELETE FROM sessions WHERE id=?", num(s.id)));
   files.forEach((f) => deleteImageFile(String(f.image_file)));
+  attachments.forEach((f) => removeInstructionFile(String(f.storage_name)));
   audit("staff", ctx.auth.staff!.id, "session.delete", `session:${num(s.id)}`);
   return { ok: true };
 });
@@ -321,7 +382,7 @@ route("GET", "/teacher/sessions/:id/shares", (ctx) => {
       const st = get("SELECT name,class,class_no FROM students WHERE id=?", num(c.student_id))!;
       return { id: num(c.id), promptLabel: prompts.find((p) => p.key === c.prompt_key)?.label || String(c.prompt_key), body: c.body, hidden: !!num(c.hidden), author: `${st.name} (${st.class}/${st.class_no})` };
     });
-    return { shareId: num(sh.id), seq: num(sh.seq), publishedAt: num(sh.published_at), entry: e, groupName: group, publicLabel: num(s.anonymise_sharing) ? `Sample Response #${num(sh.seq)}` : group, critiques };
+    return { shareId: num(sh.id), seq: num(sh.seq), publishedAt: num(sh.published_at), entry: e, groupName: group, publicLabel: num(s.anonymise_sharing) ? `Sample Response #${num(sh.seq)}` : group, critiques, reactions: reactionsFor(num(sh.id)) };
   });
   return { shares: rows.filter(Boolean), anonymised: !!num(s.anonymise_sharing) };
 });

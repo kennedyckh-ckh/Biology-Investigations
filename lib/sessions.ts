@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { all, get, run, tx, now, num, type Row } from "./db";
-import { DEFAULT_CRITIQUE_PROMPTS } from "./constants";
+import { DEFAULT_CRITIQUE_PROMPTS, TAGS } from "./constants";
+import { attachmentInfo } from "./instruction-files";
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export function newJoinCode(): string {
@@ -63,10 +64,16 @@ export function partConfig(sessionId: number) {
       part,
       instructions: String(p.instructions),
       webLink: String(p.web_link),
+      attachment: attachmentInfo(sessionId, part, true),
       visibility: String(p.visibility),
       questions: questionsFor(sessionId, part),
     };
   });
+}
+
+export function entryTagsFor(sessionId: number): readonly string[] {
+  const saved = get("SELECT tags_json FROM session_entry_tags WHERE session_id=?", sessionId);
+  return saved ? JSON.parse(String(saved.tags_json)) as string[] : TAGS;
 }
 
 export function setQuestions(sessionId: number, part: number, questions: string[]) {

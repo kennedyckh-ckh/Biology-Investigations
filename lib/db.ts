@@ -105,6 +105,19 @@ CREATE TABLE IF NOT EXISTS session_questions(
   position INTEGER NOT NULL,
   text TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS session_entry_tags(
+  session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  tags_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS instruction_attachments(
+  session_id INTEGER NOT NULL,
+  part INTEGER NOT NULL,
+  storage_name TEXT NOT NULL,
+  name TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  PRIMARY KEY(session_id, part),
+  FOREIGN KEY(session_id, part) REFERENCES session_parts(session_id, part) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS groups(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -190,6 +203,12 @@ CREATE TABLE IF NOT EXISTS critiques(
   body TEXT NOT NULL,
   hidden INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS share_reactions(
+  share_id INTEGER NOT NULL REFERENCES shares(id) ON DELETE CASCADE,
+  student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  reaction TEXT NOT NULL CHECK(reaction IN ('like','heart')),
+  PRIMARY KEY(share_id, student_id)
 );
 CREATE TABLE IF NOT EXISTS ai_outputs(
   id INTEGER PRIMARY KEY AUTOINCREMENT,

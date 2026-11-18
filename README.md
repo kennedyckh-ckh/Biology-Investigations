@@ -20,6 +20,8 @@ Optional demo class: with the app running, `BASE=http://localhost:3000 npm run s
 
 This is a Node.js web service, not a Static Site. The root [`render.yaml`](render.yaml) configures the build, health check and a 1 GB persistent disk for SQLite and uploaded images.
 
+Instruction files are stored on the same disk as the database and student images. Each part can have one file up to 500 MB. Increase disk capacity before hosting several large files; replacing a file temporarily needs room for both versions.
+
 1. In the Render Dashboard, choose **New → Blueprint**, connect GitHub and select this repository. Choose the branch that contains `render.yaml`, or `main` after the changes have been merged.
 2. Enter `INITIAL_EDUCATOR_EMAIL`, `INITIAL_EDUCATOR_PASSWORD`, `INITIAL_TEACHER_EMAIL` and `INITIAL_TEACHER_PASSWORD` in Render. Use distinct email addresses and distinct private passwords of at least 16 characters; don't commit credentials to GitHub.
 3. Review the paid web service and disk before creating the Blueprint. A free web service cannot attach a persistent disk ([Render persistent disks](https://render.com/docs/disks)).
@@ -28,6 +30,12 @@ This is a Node.js web service, not a Static Site. The root [`render.yaml`](rende
 For an existing Render service, update it in place rather than creating a second service. Use the build and start commands, Node version, environment and health check settings from this repository. Keep the existing persistent disk and `DATA_DIR` if it already contains classroom data. Back up your database and uploads before switching settings or moving data; a new disk starts empty. Do not copy a local demo database into a public service: private mode blocks the known demo passwords but does not replace existing accounts, rotate their credentials or revoke old sessions.
 
 The four `INITIAL_…` values are only used to create the first two staff accounts on an empty database. The educator and teacher are linked automatically. Editing those values later does not change any existing password. Local development still uses the demo setup by default, but on Render demo sign-in is disabled and the demo accounts are not seeded. The app uses mock AI by default unless a real provider is configured.
+
+## Session setup and peer review
+
+- In **Setup**, upload, replace or remove the **Instruction file** in each part. Students can download it once that part is open. Uploaded files are downloads, not embedded previews; upload only files suitable for your class.
+- In **Setup → Session settings → Customise entry tags**, edit the list one tag per line, then click **Save settings**. Defaults apply until customised. Existing entries retain their original tags.
+- In **Class board**, students can Like or Heart a peer's shared response. Selecting the same reaction again removes it. Only aggregate counts and the student's own selection are shown, not the names of students who reacted.
 
 ## Local test accounts (seeded on first start)
 

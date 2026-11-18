@@ -14,6 +14,8 @@ export const TAGS = [
   "Improvement",
 ] as const;
 export type Tag = (typeof TAGS)[number];
+export type PeerReaction = "like" | "heart";
+export interface InstructionFile { name: string; size: number; url: string }
 
 export const PART_TITLES: Record<number, string> = {
   1: "Part 1: Designing the Investigation",
@@ -41,6 +43,9 @@ export const LIMITS = {
   classMax: 20,
   critiqueMax: 1000,
   critiqueLabelMax: 120,
+  instructionFileBytes: 500_000_000,
+  entryTagMax: 60,
+  entryTagCount: 30,
 };
 
 export const ONLINE_WINDOW_MS = 15000;

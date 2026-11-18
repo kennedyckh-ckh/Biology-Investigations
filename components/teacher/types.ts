@@ -1,9 +1,11 @@
 import type { TableData } from "@/components/ui";
+import type { InstructionFile } from "@/lib/constants";
 
 export interface PartCfg {
   part: number;
   instructions: string;
   webLink: string;
+  attachment: InstructionFile | null;
   visibility: "hidden" | "visible" | "open";
   questions: { id: number; text: string }[];
 }
@@ -14,6 +16,7 @@ export interface SessionDetail {
   status: "active" | "archived";
   anonymiseSharing: boolean;
   critiquePrompts: { key: string; label: string; enabled: boolean }[];
+  entryTags: string[];
   aiCriteria: string;
   pedagogyNotes: string;
   source: { templateId: number; title: string; importedVersion: number; currentVersion: number | null } | null;

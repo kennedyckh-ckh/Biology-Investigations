@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { all, UPLOAD_DIR, num, type Row } from "./db";
 import { bad } from "./router";
-import { TAGS, LIMITS } from "./constants";
+import { LIMITS } from "./constants";
 
 export interface TableData {
   columns: string[];
@@ -46,9 +46,9 @@ export function entriesWhere(where: string, ...params: unknown[]): EntryDto[] {
   return all(`${BASE} AND ${where} ORDER BY e.created_at, e.id`, ...params).map(toDto);
 }
 
-export function validateTag(v: unknown): string | null {
+export function validateTag(v: unknown, tags: readonly string[], current?: unknown): string | null {
   if (v === undefined || v === null || v === "") return null;
-  if (typeof v !== "string" || !(TAGS as readonly string[]).includes(v)) throw bad("Unknown tag");
+  if (typeof v !== "string" || (!tags.includes(v) && v !== current)) throw bad("Unknown tag");
   return v;
 }
 
