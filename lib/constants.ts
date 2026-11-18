@@ -16,7 +16,7 @@ export const TAGS = [
 export type Tag = (typeof TAGS)[number];
 export type PeerReaction = "like" | "heart";
 export interface InstructionFile { name: string; size: number; url: string; previewUrl: string | null }
-export interface InstructionBlock { title: string; text: string }
+export interface InstructionBlock { id: string; title: string; text: string; webLink: string; attachment?: InstructionFile | null }
 export interface DesignTagHint { tag: string; hint: string }
 
 export const PART_TITLES: Record<number, string> = {

@@ -20,7 +20,7 @@ Optional demo class: with the app running, `BASE=http://localhost:3000 npm run s
 
 This is a Node.js web service, not a Static Site. The root [`render.yaml`](render.yaml) configures the build, health check and a 1 GB persistent disk for SQLite and uploaded images.
 
-Instruction files are stored on the same disk as the database and student images. Each part can have one file up to 500 MB. Increase disk capacity before hosting several large files; replacing a file temporarily needs room for both versions.
+Instruction files are stored on the same disk as the database and student images. Each part can have one shared file and each task can have one diagram, up to 500 MB per upload. Increase disk capacity before hosting several large files; replacing a file temporarily needs room for both versions.
 
 1. In the Render Dashboard, choose **New → Blueprint**, connect GitHub and select this repository. Choose the branch that contains `render.yaml`, or `main` after the changes have been merged.
 2. Enter `INITIAL_EDUCATOR_EMAIL`, `INITIAL_EDUCATOR_PASSWORD`, `INITIAL_TEACHER_EMAIL` and `INITIAL_TEACHER_PASSWORD` in Render. Use distinct email addresses and distinct private passwords of at least 16 characters; don't commit credentials to GitHub.
@@ -36,12 +36,13 @@ The four `INITIAL_…` values are only used to create the first two staff accoun
 - Sign in as **Teacher Educator → Teachers you support → Add teacher** to provision another classroom teacher with their own email and private password. The teacher will be linked to that educator, who can assign them templates but cannot view their live sessions. No new Render environment variables are needed.
 - Students can join as new without approval, even if their details match another student's. They can choose **Recover my previous work on a new device** instead; that separate action still verifies a group PIN or requires teacher approval.
 
-- In **Setup**, keep a **Part overview** and use **Add task block** to create up to 12 ordered tasks in each part. Use the arrows to change their order, then save the part. The overview, web link, guiding questions and one shared instruction file still apply to the whole part.
-- Upload, replace or remove the shared **Instruction file** in each part. When the part opens, students see PNG, JPEG, WebP and GIF diagrams directly on the page. Other files remain downloadable; export diagrams as PNG if you want them to appear inline.
+- In **Setup**, use **Add task block** to create up to 12 ordered tasks in each part. Add an external link inside a task, then save the part to enable diagram uploads. Each task can have one PNG, JPEG, WebP or GIF diagram up to 500 MB. Links and diagrams follow their tasks when reordered. Students see a compact diagram and can select **Enlarge diagram** for a closer look.
+- **Shared part resources** are separate from the tasks. Existing part-level links and files are preserved. A general supporting file can still be uploaded for the whole part.
+- Select **Student view** in the teacher’s session header to check open and locked parts, released hints, entry tags and the Class board. The preview is read-only and does not join a group or show private group work.
 - In **Setup → Session settings → Customise entry tags**, edit the list one tag per line, then click **Save settings**. Defaults apply until customised. Existing entries retain their original tags.
 - In **Setup → Session settings**, add or rename peer critique prompts and write and save **Design entry-tag hints**. Click **Live monitor → Show design tag hints** to release the hints, or **Hide design tag hints** to withdraw them. In open Part 1, students click **Entry-tag hints** beside **Group entries** to read the released hints one at a time.
 - Students can click **Submit my work** for each open part. It submits only their own entries and does not submit or lock classmates' work. Teachers can review and reopen individual submissions under **Live monitor → Group progress**. Group submission is still a separate action.
-- In **Class board**, students can Star or Heart a peer's shared response. Selecting the same reaction again removes it. Only aggregate counts and the student's own selection are shown, not the names of students who reacted.
+- In **Class board**, students can select **Enlarge response** to read a peer’s shared text, image and table in a larger view. They can Star or Heart the response. Selecting the same reaction again removes it. Only aggregate counts and the student's own selection are shown, not the names of students who reacted.
 
 ## AI API usage and limits
 

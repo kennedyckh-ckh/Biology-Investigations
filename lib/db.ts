@@ -132,6 +132,16 @@ CREATE TABLE IF NOT EXISTS part_instruction_blocks(
   PRIMARY KEY(session_id, part),
   FOREIGN KEY(session_id, part) REFERENCES session_parts(session_id, part) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS task_instruction_attachments(
+  session_id INTEGER NOT NULL,
+  part INTEGER NOT NULL,
+  task_id TEXT NOT NULL,
+  storage_name TEXT NOT NULL,
+  name TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  PRIMARY KEY(session_id, part, task_id),
+  FOREIGN KEY(session_id, part) REFERENCES part_instruction_blocks(session_id, part) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS groups(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

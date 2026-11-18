@@ -1,10 +1,11 @@
-import { route, bad, forbidden, notFound, HttpError, str, int, partNo, safeLink } from "../router";
+import { route, bad, forbidden, notFound, HttpError, str, int, partNo, safeLink, type Ctx } from "../router";
 import { all, get, run, tx, now, num, audit, type Row } from "../db";
 import { requireTeacher, ownSession, ownGroup, mustBeActive, submissionInfo, individualSubmissionInfo, onlineEditors } from "../authz";
-import { createSession, partConfig, setQuestions, activeGroupIds, entryTagsFor, designHintsFor, designHintsVisible } from "../sessions";
+import { createSession, partConfig, setQuestions, activeGroupIds, entryTagsFor, designHintsFor, designHintsVisible, instructionBlocksFor, studentPart } from "../sessions";
 import { entriesWhere, deleteImageFile } from "../entries";
 import { publishedShares, publishedAi, critiquePromptsOf, reactionsFor } from "../sharing";
-import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS, DEFAULT_CRITIQUE_PROMPTS } from "../constants";
+import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS, DEFAULT_CRITIQUE_PROMPTS, type InstructionBlock } from "../constants";
+import { randomUUID } from "node:crypto";
 import { attachmentInfo, attachmentRow, downloadInstructionFile, receiveInstructionFile, removeInstructionFile, uploadsInProgress } from "../instruction-files";
 
 /* ---------- Sessions list / create ---------- */
@@ -184,73 +185,131 @@ route("PUT", "/teacher/sessions/:id/parts/:n", (ctx) => {
   if (!Array.isArray(b.questions)) throw bad("Guiding questions must be a list");
   const qs = (b.questions as unknown[]).map((q) => str(q, 500, "Guiding question", { optional: true })).filter(Boolean);
   if (qs.length > 20) throw bad("At most 20 guiding questions per part");
-  let blocksJson: string | undefined;
+  const sid = num(s.id);
+  let blocks: InstructionBlock[] | undefined;
   if ("instructionBlocks" in b) {
     if (!Array.isArray(b.instructionBlocks) || b.instructionBlocks.length > LIMITS.instructionBlockCount) {
       throw bad(`Use up to ${LIMITS.instructionBlockCount} task blocks per part.`);
     }
-    blocksJson = JSON.stringify((b.instructionBlocks as unknown[]).map((block) => {
+    const previous = instructionBlocksFor(sid, part);
+    const ids = new Set<string>();
+    blocks = (b.instructionBlocks as unknown[]).map((block, i) => {
       if (!block || typeof block !== "object") throw bad("Invalid task block.");
-      const value = block as { title?: unknown; text?: unknown };
+      const value = block as { id?: unknown; title?: unknown; text?: unknown; webLink?: unknown };
+      const id = value.id === undefined ? previous[i]?.id ?? randomUUID() : value.id;
+      if (typeof id !== "string" || (!previous.some((p) => p.id === id) && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) || ids.has(id)) throw bad("Each task must have a unique ID.");
+      ids.add(id);
       return {
+        id,
         title: str(value.title, LIMITS.instructionTitleMax, "Task heading", { optional: true }),
         text: str(value.text, LIMITS.instructionTextMax, "Task instructions"),
+        webLink: value.webLink === undefined ? previous.find((p) => p.id === id)?.webLink ?? "" : safeLink(value.webLink),
       };
-    }));
+    });
   }
+  const removedFiles: string[] = [];
   tx(() => {
-    run("UPDATE session_parts SET instructions=?, web_link=? WHERE session_id=? AND part=?", instructions, link, num(s.id), part);
-    setQuestions(num(s.id), part, qs);
-    if (blocksJson !== undefined) {
-      run("INSERT INTO part_instruction_blocks(session_id,part,blocks_json) VALUES(?,?,?) ON CONFLICT(session_id,part) DO UPDATE SET blocks_json=excluded.blocks_json", num(s.id), part, blocksJson);
+    run("UPDATE session_parts SET instructions=?, web_link=? WHERE session_id=? AND part=?", instructions, link, sid, part);
+    setQuestions(sid, part, qs);
+    if (blocks !== undefined) {
+      run("INSERT INTO part_instruction_blocks(session_id,part,blocks_json) VALUES(?,?,?) ON CONFLICT(session_id,part) DO UPDATE SET blocks_json=excluded.blocks_json", sid, part, JSON.stringify(blocks));
+      for (const row of all("SELECT task_id,storage_name FROM task_instruction_attachments WHERE session_id=? AND part=?", sid, part)) {
+        if (blocks.some((b) => b.id === row.task_id)) continue;
+        run("DELETE FROM task_instruction_attachments WHERE session_id=? AND part=? AND task_id=?", sid, part, String(row.task_id));
+        removedFiles.push(String(row.storage_name));
+      }
     }
   });
-  return { parts: partConfig(num(s.id)) };
+  removedFiles.forEach(removeInstructionFile);
+  return { parts: partConfig(sid) };
 });
 
 const attachmentPath = "/teacher/sessions/:id/parts/:n/attachment";
-route("GET", attachmentPath, (ctx) => {
+const taskAttachmentPath = "/teacher/sessions/:id/parts/:n/tasks/:taskId/attachment";
+function getInstructionAttachment(ctx: Ctx) {
   const sid = num(ownSession(ctx, ctx.params.id).id);
-  return downloadInstructionFile(attachmentRow(sid, partNo(ctx.params.n)), ctx.query.get("preview") === "1");
-});
-route("PUT", attachmentPath, async (ctx) => {
+  const taskId = ctx.params.taskId;
+  return downloadInstructionFile(attachmentRow(sid, partNo(ctx.params.n), taskId), taskId !== undefined || ctx.query.get("preview") === "1");
+}
+async function putInstructionAttachment(ctx: Ctx) {
   const s = ownSession(ctx, ctx.params.id);
   mustBeActive(s);
   const sid = num(s.id);
   const part = partNo(ctx.params.n);
-  const key = `${sid}:${part}`;
+  const taskId = ctx.params.taskId;
+  const assertTaskExists = () => {
+    if (taskId !== undefined && !instructionBlocksFor(sid, part).some((b) => b.id === taskId)) throw notFound("Save the task before uploading a diagram.");
+  };
+  assertTaskExists();
+  const key = `${sid}:${part}:${taskId ?? ""}`;
   if (uploadsInProgress.has(key)) throw new HttpError(409, "upload_in_progress", "A file is already being uploaded to this task.");
   uploadsInProgress.add(key);
   try {
-    const file = await receiveInstructionFile(ctx.req);
+    const file = await receiveInstructionFile(ctx.req, taskId !== undefined);
     try {
       mustBeActive(ownSession(ctx, sid));
-      const old = attachmentRow(sid, part);
-      run(
+      assertTaskExists();
+      const old = attachmentRow(sid, part, taskId);
+      if (taskId === undefined) run(
         "INSERT INTO instruction_attachments(session_id,part,storage_name,name,size) VALUES(?,?,?,?,?) ON CONFLICT(session_id,part) DO UPDATE SET storage_name=excluded.storage_name,name=excluded.name,size=excluded.size",
         sid, part, file.storageName, file.name, file.size
+      );
+      else run(
+        "INSERT INTO task_instruction_attachments(session_id,part,task_id,storage_name,name,size) VALUES(?,?,?,?,?,?) ON CONFLICT(session_id,part,task_id) DO UPDATE SET storage_name=excluded.storage_name,name=excluded.name,size=excluded.size",
+        sid, part, taskId, file.storageName, file.name, file.size
       );
       if (old) removeInstructionFile(String(old.storage_name));
     } catch (error) {
       removeInstructionFile(file.storageName);
       throw error;
     }
-    return { attachment: attachmentInfo(sid, part, true) };
+    return { attachment: attachmentInfo(sid, part, `/api/teacher/sessions/${sid}`, taskId) };
   } finally {
     uploadsInProgress.delete(key);
   }
-}, { binary: true });
-route("DELETE", attachmentPath, (ctx) => {
+}
+function deleteInstructionAttachment(ctx: Ctx) {
   const s = ownSession(ctx, ctx.params.id);
   mustBeActive(s);
   const sid = num(s.id);
   const part = partNo(ctx.params.n);
-  if (uploadsInProgress.has(`${sid}:${part}`)) throw new HttpError(409, "upload_in_progress", "Wait for the upload to finish before removing the file.");
-  const old = attachmentRow(sid, part);
-  run("DELETE FROM instruction_attachments WHERE session_id=? AND part=?", sid, part);
+  const taskId = ctx.params.taskId;
+  if (uploadsInProgress.has(`${sid}:${part}:${taskId ?? ""}`)) throw new HttpError(409, "upload_in_progress", "Wait for the upload to finish before removing the file.");
+  const old = attachmentRow(sid, part, taskId);
+  if (taskId === undefined) run("DELETE FROM instruction_attachments WHERE session_id=? AND part=?", sid, part);
+  else run("DELETE FROM task_instruction_attachments WHERE session_id=? AND part=? AND task_id=?", sid, part, taskId);
   if (old) removeInstructionFile(String(old.storage_name));
   return { attachment: null };
+}
+for (const path of [attachmentPath, taskAttachmentPath]) {
+  route("GET", path, getInstructionAttachment);
+  route("PUT", path, putInstructionAttachment, { binary: true });
+  route("DELETE", path, deleteInstructionAttachment);
+}
+
+const previewPath = "/teacher/sessions/:id/student-view";
+route("GET", previewPath, (ctx) => {
+  const s = ownSession(ctx, ctx.params.id);
+  const sid = num(s.id);
+  const entryTags = entryTagsFor(sid);
+  return {
+    title: s.title, archived: s.status !== "active", entryTags,
+    parts: [1, 2, 3].map((part) => studentPart(sid, part, entryTags, `/api/teacher/sessions/${sid}/student-view`)).filter(Boolean),
+  };
 });
+route("GET", `${previewPath}/class`, (ctx) => {
+  const s = ownSession(ctx, ctx.params.id);
+  return { anonymised: !!num(s.anonymise_sharing), shares: publishedShares(s), ai: publishedAi(num(s.id)), prompts: critiquePromptsOf(s).filter((p) => p.enabled) };
+});
+for (const suffix of ["/parts/:n/attachment", "/parts/:n/tasks/:taskId/attachment"]) {
+  route("GET", `${previewPath}${suffix}`, (ctx) => {
+    const sid = num(ownSession(ctx, ctx.params.id).id);
+    const part = partNo(ctx.params.n);
+    if (get("SELECT visibility FROM session_parts WHERE session_id=? AND part=?", sid, part)?.visibility !== "open") throw forbidden("This part is not open to students.");
+    const taskId = ctx.params.taskId;
+    return downloadInstructionFile(attachmentRow(sid, part, taskId), taskId !== undefined || ctx.query.get("preview") === "1");
+  });
+}
 
 /* Visibility: hidden | visible (shown but locked) | open. Opening Part 2/3 checks the previous part. */
 function missingGroups(sessionId: number, part: number) {
@@ -297,7 +356,7 @@ route("DELETE", "/teacher/sessions/:id", (ctx) => {
   if (s.status !== "archived") throw forbidden("Archive the session first; only archived sessions can be deleted.", "not_archived");
   if (ctx.body?.confirmTitle !== s.title) throw bad("Type the session title to confirm deletion.", "confirm_required");
   const files = all("SELECT image_file FROM entries WHERE session_id=? AND image_file IS NOT NULL", num(s.id));
-  const attachments = all("SELECT storage_name FROM instruction_attachments WHERE session_id=?", num(s.id));
+  const attachments = all("SELECT storage_name FROM instruction_attachments WHERE session_id=? UNION ALL SELECT storage_name FROM task_instruction_attachments WHERE session_id=?", num(s.id), num(s.id));
   tx(() => run("DELETE FROM sessions WHERE id=?", num(s.id)));
   files.forEach((f) => deleteImageFile(String(f.image_file)));
   attachments.forEach((f) => removeInstructionFile(String(f.storage_name)));

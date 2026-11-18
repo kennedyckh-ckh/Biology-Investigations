@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, usePoll, fmtTime, ApiError } from "@/lib/client/api";
-import { EntryBody, TagBadge, Modal, Spinner, ErrorBox, Empty, useToast, type TableData } from "@/components/ui";
+import { EnlargeView, EntryBody, TagBadge, Modal, Spinner, ErrorBox, Empty, useToast, type TableData } from "@/components/ui";
 import { partIcon, WorkspaceHeading, WorkspaceIcon } from "@/components/workspace-icon";
 import type { DesignTagHint, InstructionFile } from "@/lib/constants";
 import { EntryEditor, draftStorage } from "./entry-editor";
@@ -28,7 +28,7 @@ function GuidingQuestions({ qs }: { qs: { id: number; text: string }[] }) {
   );
 }
 
-function InstructionResource({ file }: { file: InstructionFile }) {
+function InstructionResource({ file, title }: { file: InstructionFile; title: string }) {
   const [failed, setFailed] = useState(false);
   if (!file.previewUrl) return (
     <a className="btn-ghost btn-sm mt-3 max-w-full break-all" href={file.url} download>
@@ -36,13 +36,18 @@ function InstructionResource({ file }: { file: InstructionFile }) {
     </a>
   );
   return (
-    <figure className="mt-4 space-y-2 rounded-xl border border-blue-100 bg-blue-50/70 p-3 sm:p-4">
-      <WorkspaceHeading as="h4" icon="diagram">Instruction diagram</WorkspaceHeading>
+    <figure className="mt-3 w-fit max-w-full space-y-2 rounded-lg border border-blue-100 bg-white p-2.5">
       {failed ? <p role="status" className="text-sm text-slate-700">This diagram could not be displayed. Ask your teacher to check the image, or reload the page to try again.</p>
         // The image is authenticated with the student cookie, so it must load directly in the browser.
         // eslint-disable-next-line @next/next/no-img-element
-        : <img src={file.previewUrl} alt={`Teacher-provided instruction diagram: ${file.name}`} decoding="async" className="mx-auto block h-auto max-h-[36rem] w-auto max-w-full rounded-md object-contain" onError={() => setFailed(true)} />}
-      <figcaption className="break-words text-xs text-slate-600">{file.name}</figcaption>
+        : <img src={file.previewUrl} alt={`${title}: ${file.name}`} decoding="async" loading="lazy" className="block h-auto max-h-40 w-auto max-w-[min(100%,20rem)] rounded-md object-contain" onError={() => setFailed(true)} />}
+      <figcaption className="flex max-w-xs flex-wrap items-center gap-2 break-all text-xs text-slate-600">
+        <span>{file.name}</span>
+        {!failed && <EnlargeView title={title} label="Enlarge diagram">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={file.previewUrl} alt={`${title}: ${file.name}`} className="mx-auto h-auto max-h-[68dvh] max-w-full object-contain" />
+        </EnlargeView>}
+      </figcaption>
     </figure>
   );
 }
@@ -70,6 +75,53 @@ function EntryTagHelp({ hints }: { hints: DesignTagHint[] }) {
       </div>
     </div>
   );
+}
+
+export function GroupEntryHeading({ info }: { info: PartInfo }) {
+  return <div className="rounded-xl border border-blue-100 bg-white p-3">
+    {info.part === 1 ? <EntryTagHelp hints={info.designTagHints ?? []} /> : <WorkspaceHeading icon="entries">Group entries</WorkspaceHeading>}
+  </div>;
+}
+
+function ResourceLink({ url, label }: { url: string; label: string }) {
+  return <a href={url} target="_blank" rel="noopener noreferrer" className="btn-ghost btn-sm mt-3 max-w-full">
+    <WorkspaceIcon name="link" /> {label} <span className="font-normal text-slate-600">(new tab)</span>
+  </a>;
+}
+
+export function StudentPartInstructions({ info }: { info: PartInfo }) {
+  if (info.locked) return (
+    <div className="card flex flex-col items-center gap-3 py-16 text-center">
+      <WorkspaceHeading icon="lock">{info.title}</WorkspaceHeading>
+      <p className="max-w-md text-sm text-slate-600">This part is locked. Your teacher will unlock it when the class is ready. This page checks automatically.</p>
+    </div>
+  );
+  return <section className="card">
+    <WorkspaceHeading icon={partIcon(info.part)}>{info.title}</WorkspaceHeading>
+    {info.instructions && <p className="mt-2 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-slate-700">{info.instructions}</p>}
+    {(info.webLink || info.attachment) && <div className="mt-3 border-t border-blue-100 pt-2">
+      <p className="text-xs font-semibold text-blue-900">Shared part resources</p>
+      {info.webLink && <ResourceLink url={info.webLink} label="Open the part resource" />}
+      {info.attachment && <InstructionResource key={info.attachment.previewUrl ?? info.attachment.name} file={info.attachment} title="Shared part diagram" />}
+    </div>}
+    {!!info.instructionBlocks?.length && (
+      <div className="mt-4 space-y-3">
+        <WorkspaceHeading as="h4" icon="task">Tasks</WorkspaceHeading>
+        <ol className="space-y-2">
+          {info.instructionBlocks.map(({ id, title, text, webLink, attachment }, i) => (
+            <li key={id} className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 sm:p-4">
+              <h5 className="break-words text-sm font-semibold text-blue-950">Task {i + 1}{title ? `: ${title}` : ""}</h5>
+              <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{text}</p>
+              {attachment && <InstructionResource key={attachment.previewUrl ?? attachment.name} file={attachment} title={`Task ${i + 1} diagram${title ? `: ${title}` : ""}`} />}
+              {webLink && <ResourceLink url={webLink} label="Open task resource" />}
+            </li>
+          ))}
+        </ol>
+      </div>
+    )}
+    {!info.instructions && !info.instructionBlocks?.length && !info.attachment && !info.webLink && !info.questions?.length && <p className="mt-2 text-sm text-slate-600">No instructions yet.</p>}
+    <GuidingQuestions qs={info.questions ?? []} />
+  </section>;
 }
 
 export function PartView({ info, entryTags, studentId, active, onChanged }: { info: PartInfo; entryTags: readonly string[]; studentId: number; active: boolean; onChanged: () => void }) {
@@ -183,44 +235,14 @@ export function PartView({ info, entryTags, studentId, active, onChanged }: { in
   const others = (data?.entries ?? []).filter((e) => !e.mine);
   const editingNames = useMemo(() => (data?.editing ?? []).map((e) => e.name), [data]);
 
-  if (info.locked)
-    return (
-      <div className="card flex flex-col items-center gap-3 py-16 text-center">
-        <WorkspaceHeading icon="lock">{info.title}</WorkspaceHeading>
-        <p className="max-w-md text-sm text-slate-600">This part is locked. Your teacher will unlock it when the class is ready. This page checks automatically.</p>
-      </div>
-    );
+  if (info.locked) return <StudentPartInstructions info={info} />;
 
   const newKey = () => `new-${Math.random().toString(36).slice(2, 10)}`;
   const entryCount = (data?.entries.length ?? 0) + drafts.filter((d) => d.entry === null).length;
 
   return (
     <div className="space-y-5">
-      <div className="card">
-        <WorkspaceHeading icon={partIcon(info.part)}>{info.title}</WorkspaceHeading>
-        {info.instructions && <p className="mt-2 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-slate-700">{info.instructions}</p>}
-        {!!info.instructionBlocks?.length && (
-          <div className="mt-4 space-y-3">
-            <WorkspaceHeading as="h4" icon="task">Tasks</WorkspaceHeading>
-            <ol className="space-y-2">
-              {info.instructionBlocks.map(({ title, text }, i) => (
-                <li key={i} className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 sm:p-4">
-                  <h5 className="break-words text-sm font-semibold text-blue-950">Task {i + 1}{title ? `: ${title}` : ""}</h5>
-                  <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{text}</p>
-                </li>
-              ))}
-            </ol>
-          </div>
-        )}
-        {!info.instructions && !info.instructionBlocks?.length && !info.attachment && !info.webLink && !info.questions?.length && <p className="mt-2 text-sm text-slate-600">No instructions yet.</p>}
-        {info.webLink && (
-          <a href={info.webLink} target="_blank" rel="noopener noreferrer" className="btn-ghost btn-sm mt-3">
-            <WorkspaceIcon name="link" /> Open the web resource <span className="font-normal text-slate-600">(new tab)</span>
-          </a>
-        )}
-        {info.attachment && <InstructionResource key={info.attachment.previewUrl ?? info.attachment.name} file={info.attachment} />}
-        <GuidingQuestions qs={info.questions ?? []} />
-      </div>
+      <StudentPartInstructions info={info} />
 
       {sub.status === "submitted" && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900" role="status">
@@ -239,11 +261,7 @@ export function PartView({ info, entryTags, studentId, active, onChanged }: { in
         </div>
       )}
 
-      <div className="rounded-xl border border-blue-100 bg-white p-3">
-        {info.part === 1
-          ? <EntryTagHelp hints={info.designTagHints ?? []} />
-          : <WorkspaceHeading icon="entries">Group entries</WorkspaceHeading>}
-      </div>
+      <GroupEntryHeading info={info} />
       {error && !data && <ErrorBox message={error.message} onRetry={refresh} />}
       {error && data && <div className="rounded-lg bg-amber-50 p-2 text-center text-xs text-amber-800">Connection problem – showing the last update. Your own typing is still being kept safe.</div>}
       {loading && !data && <Spinner label="Loading your group’s entries…" />}

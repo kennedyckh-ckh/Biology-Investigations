@@ -5,12 +5,13 @@ import { api, usePoll } from "@/lib/client/api";
 import { Header, Spinner, ErrorBox } from "@/components/ui";
 import { PartView, ReferencePanel } from "@/components/student/part-view";
 import { ClassBoard } from "@/components/student/class-board";
+import { visibleStudentTab, WorkspaceNav } from "@/components/student/workspace-nav";
 import type { StateResp } from "@/components/student/types";
 
 export default function StudentPage() {
   const router = useRouter();
   const { data, error, loading, refresh } = usePoll<StateResp>("/student/state", 5000);
-  const [tab, setTab] = useState<number | "class">(1);
+  const [selectedTab, setTab] = useState<number | "class">(1);
 
   useEffect(() => {
     if (error && (error.status === 401 || error.status === 403)) router.replace("/");
@@ -24,6 +25,7 @@ export default function StudentPage() {
       </div>
     );
 
+  const tab = visibleStudentTab(data.parts, selectedTab);
   const current = typeof tab === "number" ? data.parts.find((p) => p.part === tab) : undefined;
   const hasRef = current && !current.locked && current.part > 1;
 
@@ -49,20 +51,7 @@ export default function StudentPage() {
       />
       {data.session.archived && <div className="bg-amber-100 px-4 py-2 text-center text-sm font-medium text-amber-900">This session has been archived. You can no longer make changes.</div>}
 
-      <nav className="border-b border-slate-200 bg-white" aria-label="Parts">
-        <div className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 sm:px-6">
-          {data.parts.map((p) => (
-            <button key={p.part} onClick={() => setTab(p.part)} className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold ${tab === p.part ? "border-blue-700 text-blue-800" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
-              {p.locked ? "🔒 " : p.submission?.status === "submitted" ? "✓ " : ""}
-              Part {p.part}
-              <span className="ml-1 hidden font-normal sm:inline">· {p.title.split(": ")[1]}</span>
-            </button>
-          ))}
-          <button onClick={() => setTab("class")} className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold ${tab === "class" ? "border-violet-600 text-violet-800" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
-            📣 Class board
-          </button>
-        </div>
-      </nav>
+      <WorkspaceNav parts={data.parts} tab={tab} onTab={setTab} />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
         <div className={hasRef ? "grid gap-6 xl:grid-cols-[1fr_380px]" : ""}>

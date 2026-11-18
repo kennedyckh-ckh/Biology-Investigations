@@ -11,9 +11,9 @@ import {
   onlineEditors,
 } from "../authz";
 import { entriesWhere, validateTag, validateTable, saveImage, deleteImageFile, readImage } from "../entries";
-import { designHintsFor, designHintsVisible, entryTagsFor, instructionBlocksFor, questionsFor } from "../sessions";
+import { entryTagsFor, studentPart } from "../sessions";
 import { publishedShares, publishedAi, critiquePromptsOf, reactionsFor } from "../sharing";
-import { attachmentInfo, attachmentRow, downloadInstructionFile } from "../instruction-files";
+import { attachmentRow, downloadInstructionFile } from "../instruction-files";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS } from "../constants";
 
 route("GET", "/student/state", (ctx) => {
@@ -23,19 +23,10 @@ route("GET", "/student/state", (ctx) => {
   const entryTags = entryTagsFor(sid);
   const parts = [1, 2, 3]
     .map((part) => {
-      const p = get("SELECT * FROM session_parts WHERE session_id=? AND part=?", sid, part)!;
-      const vis = String(p.visibility);
-      if (vis === "hidden") return null;
-      const base = { part, title: PART_TITLES[part], locked: vis !== "open" };
-      if (vis !== "open") return base;
+      const base = studentPart(sid, part, entryTags);
+      if (!base || base.locked) return base;
       return {
         ...base,
-        instructions: String(p.instructions),
-        instructionBlocks: instructionBlocksFor(sid, part),
-        webLink: String(p.web_link),
-        attachment: attachmentInfo(sid, part),
-        questions: questionsFor(sid, part),
-        ...(part === 1 && designHintsVisible(sid) ? { designTagHints: designHintsFor(sid).filter(({ tag }) => entryTags.includes(tag)) } : {}),
         submission: submissionInfo(gid, part),
         individualSubmission: individualSubmissionInfo(num(sc.student.id), part),
         entryCount: num(get("SELECT COUNT(*) AS n FROM entries WHERE group_id=? AND part=? AND deleted_at IS NULL", gid, part)!.n),
@@ -65,6 +56,12 @@ route("GET", "/student/parts/:n/attachment", (ctx) => {
   const part = partNo(ctx.params.n);
   assertStudentCanRead(sc, part);
   return downloadInstructionFile(attachmentRow(num(sc.session.id), part), ctx.query.get("preview") === "1");
+});
+route("GET", "/student/parts/:n/tasks/:taskId/attachment", (ctx) => {
+  const sc = requireStudent(ctx);
+  const part = partNo(ctx.params.n);
+  assertStudentCanRead(sc, part);
+  return downloadInstructionFile(attachmentRow(num(sc.session.id), part, ctx.params.taskId), true);
 });
 
 route("GET", "/student/entries", (ctx) => {
