@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { api, usePoll, fmtTime, ApiError } from "@/lib/client/api";
-import { Spinner, ErrorBox, Modal, Field, useToast } from "@/components/ui";
+import { Spinner, ErrorBox, Modal, Field, useToast, EntryBody, TagBadge, type TableData } from "@/components/ui";
 import { PART_TITLES } from "@/lib/constants";
 import type { SessionDetail, StatusResp } from "./types";
 
@@ -11,13 +11,67 @@ const VIS = [
   { v: "open", label: "Open", hint: "Students can work on it" },
 ] as const;
 
+function IndividualReview({ sessionId, target, archived, onClose, onChanged }: {
+  sessionId: number; target: { studentId: number; part: number; name: string }; archived: boolean;
+  onClose: () => void; onChanged: () => void;
+}) {
+  const path = `/teacher/sessions/${sessionId}/students/${target.studentId}/parts/${target.part}/submission`;
+  const { data, error, refresh } = usePoll<{
+    revision: number; submittedAt: number; reopened: boolean;
+    entries: { id: number; tag: string | null; body: string; hasImage: boolean; table: TableData | null }[];
+  }>(path, 0);
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  async function reopen() {
+    setBusy(true);
+    try {
+      await api("POST", path);
+      toast("Individual work reopened for revision");
+      onChanged();
+      onClose();
+    } catch (e) { toast((e as ApiError).message, "err"); }
+    finally { setBusy(false); }
+  }
+  return (
+    <Modal title={`${target.name}: Part ${target.part} submission`} onClose={onClose} wide>
+      {error && <ErrorBox message={error.message} onRetry={refresh} />}
+      {!data && !error && <Spinner />}
+      {data && (
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">Revision {data.revision} · Submitted {fmtTime(data.submittedAt)}</p>
+          <div className="max-h-[52vh] space-y-3 overflow-y-auto">
+            {data.entries.map((entry) => (
+              <article key={entry.id} className="rounded-lg border border-slate-200 p-3">
+                <TagBadge tag={entry.tag} />
+                <EntryBody body={entry.body} table={entry.table} entryId={entry.id} hasImage={entry.hasImage && !data.reopened} />
+                {entry.hasImage && data.reopened && <p className="mt-2 text-xs text-slate-500">An image was attached. Its earlier version is not shown after reopening.</p>}
+              </article>
+            ))}
+          </div>
+          {!data.reopened && !archived && <button className="btn-ghost" disabled={busy} onClick={reopen}>Reopen individual work</button>}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export function Monitor({ session, onRead, onSessionChanged }: { session: SessionDetail; onRead: (groupId: number, part: number) => void; onSessionChanged: () => void }) {
   const toast = useToast();
   const { data, error, loading, refresh } = usePoll<StatusResp>(`/teacher/sessions/${session.id}/status`, 4000);
   const [override, setOverride] = useState<null | { part: number; message: string }>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [individual, setIndividual] = useState<{ studentId: number; part: number; name: string } | null>(null);
   const archived = session.status === "archived";
+  async function toggleHints(visible: boolean) {
+    setBusy(true);
+    try {
+      await api("PUT", `/teacher/sessions/${session.id}/design-tag-hints/visibility`, { visible });
+      await refresh();
+      toast(visible ? "Design tag hints shown to students" : "Design tag hints hidden from students");
+    } catch (e) { toast((e as ApiError).message, "err"); }
+    finally { setBusy(false); }
+  }
 
   async function setVis(part: number, visibility: string, ov?: { reason: string }) {
     setBusy(true);
@@ -102,6 +156,14 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
                 ))}
               </div>
               <p className="mt-2 text-xs text-slate-500">{VIS.find((o) => o.v === p.visibility)?.hint}</p>
+              {p.part === 1 && (
+                <div className="mt-3 border-t border-slate-200 pt-3">
+                  <button className="btn-ghost btn-sm" disabled={busy || archived} onClick={() => toggleHints(!data.designHintsVisible)}>
+                    {data.designHintsVisible ? "Hide design tag hints" : "Show design tag hints"}
+                  </button>
+                  <p className="mt-1 text-xs text-slate-600">{data.designHintsVisible ? "Students can see the panel while Part 1 is open." : "Students cannot see the hint panel."}</p>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -163,6 +225,23 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
                             </button>
                           )}
                         </div>
+                        {g.members.length > 0 && (
+                          <details className="mt-2 text-xs text-slate-600">
+                            <summary className="cursor-pointer font-semibold">
+                              Individual: {g.members.filter((m) => m.individualSubmissions[p.part - 1].status === "submitted").length}/{g.members.length} submitted
+                            </summary>
+                            <ul className="mt-2 space-y-1">
+                              {g.members.map((m) => {
+                                const my = m.individualSubmissions[p.part - 1];
+                                return <li key={m.id} className="flex flex-wrap items-center gap-2"><span>{m.name}</span>{my.revision ? (
+                                  <button className="text-blue-800 underline" onClick={() => setIndividual({ studentId: m.id, part: p.part, name: m.name })}>
+                                    {my.status === "revising" ? "Reopened · View last submission" : "View submission"}
+                                  </button>
+                                ) : <span className="text-slate-500">Not submitted</span>}</li>;
+                              })}
+                            </ul>
+                          </details>
+                        )}
                       </td>
                     );
                   })}
@@ -172,6 +251,7 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
           </table>
         </div>
       </section>
+      {individual && <IndividualReview sessionId={session.id} target={individual} archived={archived} onClose={() => setIndividual(null)} onChanged={refresh} />}
 
       {data.recovery.length > 0 && (
         <section className="rounded-2xl border border-amber-300 bg-amber-50 p-4">

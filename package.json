@@ -10,6 +10,7 @@
     "test:api": "node scripts/test-api.mjs",
     "test:ai": "node scripts/test-ai.mjs",
     "test:unit": "tsx scripts/test-ai-unit.ts",
+    "test:api-budget": "tsx scripts/test-api-budget.ts",
     "seed:demo": "node scripts/seed-demo.mjs"
   },
   "engines": {

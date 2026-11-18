@@ -4,12 +4,14 @@ import {
   requireStudent,
   assertStudentCanRead,
   assertStudentCanEdit,
+  assertStudentCanEditOwnWork,
+  individualSubmissionInfo,
   submissionInfo,
   partVisibility,
   onlineEditors,
 } from "../authz";
 import { entriesWhere, validateTag, validateTable, saveImage, deleteImageFile, readImage } from "../entries";
-import { designHintsFor, entryTagsFor, questionsFor } from "../sessions";
+import { designHintsFor, designHintsVisible, entryTagsFor, questionsFor } from "../sessions";
 import { publishedShares, publishedAi, critiquePromptsOf, reactionsFor } from "../sharing";
 import { attachmentInfo, attachmentRow, downloadInstructionFile } from "../instruction-files";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS } from "../constants";
@@ -32,8 +34,9 @@ route("GET", "/student/state", (ctx) => {
         webLink: String(p.web_link),
         attachment: attachmentInfo(sid, part),
         questions: questionsFor(sid, part),
-        ...(part === 1 ? { designTagHints: designHintsFor(sid).filter(({ tag }) => entryTags.includes(tag)) } : {}),
+        ...(part === 1 && designHintsVisible(sid) ? { designTagHints: designHintsFor(sid).filter(({ tag }) => entryTags.includes(tag)) } : {}),
         submission: submissionInfo(gid, part),
+        individualSubmission: individualSubmissionInfo(num(sc.student.id), part),
         entryCount: num(get("SELECT COUNT(*) AS n FROM entries WHERE group_id=? AND part=? AND deleted_at IS NULL", gid, part)!.n),
       };
     })
@@ -69,7 +72,7 @@ route("GET", "/student/entries", (ctx) => {
   assertStudentCanRead(sc, part);
   const entries = entriesWhere("e.group_id=? AND e.part=?", num(sc.group.id), part).map((e) => ({ ...e, mine: e.studentId === num(sc.student.id) }));
   const editing = onlineEditors(num(sc.group.id), part, num(sc.student.id)).map((r) => ({ studentId: num(r.student_id), name: r.name, entryId: num(r.editing_entry_id) }));
-  return { entries, editing, submission: submissionInfo(num(sc.group.id), part) };
+  return { entries, editing, submission: submissionInfo(num(sc.group.id), part), individualSubmission: individualSubmissionInfo(num(sc.student.id), part) };
 });
 
 function bodyText(v: unknown): string {
@@ -83,7 +86,7 @@ route("POST", "/student/entries", (ctx) => {
   const sc = requireStudent(ctx);
   const b = ctx.body || {};
   const part = partNo(b.part);
-  assertStudentCanEdit(sc, part);
+  assertStudentCanEditOwnWork(sc, part);
   const tag = validateTag(b.tag, entryTagsFor(num(sc.session.id)));
   const body = bodyText(b.body);
   const table = validateTable(b.table);
@@ -116,7 +119,7 @@ function ownEntry(ctx: Ctx, sc: ReturnType<typeof requireStudent>) {
 route("PATCH", "/student/entries/:id", (ctx) => {
   const sc = requireStudent(ctx);
   const e = ownEntry(ctx, sc);
-  assertStudentCanEdit(sc, num(e.part));
+  assertStudentCanEditOwnWork(sc, num(e.part));
   const b = ctx.body || {};
   const sets: string[] = [];
   const vals: unknown[] = [];
@@ -151,7 +154,7 @@ route("PATCH", "/student/entries/:id", (ctx) => {
 route("DELETE", "/student/entries/:id", (ctx) => {
   const sc = requireStudent(ctx);
   const e = ownEntry(ctx, sc);
-  assertStudentCanEdit(sc, num(e.part));
+  assertStudentCanEditOwnWork(sc, num(e.part));
   // Soft delete: submitted snapshots and AI citations stay valid.
   run("UPDATE entries SET deleted_at=?, updated_at=? WHERE id=?", now(), now(), num(e.id));
   run("DELETE FROM shares WHERE entry_id=?", num(e.id));
@@ -163,7 +166,8 @@ route("POST", "/student/presence", (ctx) => {
   const b = ctx.body || {};
   const part = partNo(b.part);
   if (partVisibility(num(sc.session.id), part) !== "open") throw forbidden("This part is locked.", "part_locked");
-  const editing = b.editingEntryId === null || b.editingEntryId === undefined ? null : int(b.editingEntryId, "editingEntryId");
+  const individual = individualSubmissionInfo(num(sc.student.id), part);
+  const editing = individual.status === "submitted" || b.editingEntryId === null || b.editingEntryId === undefined ? null : int(b.editingEntryId, "editingEntryId");
   run(
     "INSERT INTO presence(student_id,group_id,part,editing_entry_id,last_beat) VALUES(?,?,?,?,?) ON CONFLICT(student_id) DO UPDATE SET part=excluded.part, editing_entry_id=excluded.editing_entry_id, last_beat=excluded.last_beat",
     num(sc.student.id),
@@ -215,6 +219,24 @@ route("POST", "/student/submit", (ctx) => {
       JSON.stringify(entries)
     );
     return { submission: submissionInfo(gid, part) };
+  });
+});
+
+route("POST", "/student/submit-individual", (ctx) => {
+  const sc = requireStudent(ctx);
+  const part = partNo(ctx.body?.part);
+  if (ctx.body?.confirm !== true) throw bad("Please confirm your individual submission.", "confirm_required");
+  assertStudentCanRead(sc, part);
+  const studentId = num(sc.student.id);
+  return tx(() => {
+    const latest = individualSubmissionInfo(studentId, part);
+    if (latest.status === "submitted") throw new HttpError(409, "individual_submitted", "You already submitted your own work for this part.");
+    const entries = entriesWhere("e.student_id=? AND e.part=?", studentId, part);
+    if (!entries.length) throw bad("Add at least one of your own entries before submitting.", "nothing_to_submit");
+    run("INSERT INTO individual_submissions(student_id,part,revision,submitted_at,snapshot_json) VALUES(?,?,?,?,?)",
+      studentId, part, latest.revision + 1, now(), JSON.stringify(entries));
+    run("UPDATE presence SET editing_entry_id=NULL WHERE student_id=? AND part=?", studentId, part);
+    return { individualSubmission: individualSubmissionInfo(studentId, part) };
   });
 });
 

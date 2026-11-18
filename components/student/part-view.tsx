@@ -9,6 +9,7 @@ interface EntriesResp {
   entries: Entry[];
   editing: { studentId: number; name: string; entryId: number }[];
   submission: Submission;
+  individualSubmission: Submission;
 }
 
 function GuidingQuestions({ qs }: { qs: { id: number; text: string }[] }) {
@@ -32,10 +33,33 @@ export function PartView({ info, entryTags, studentId, active, onChanged }: { in
   const [statuses, setStatuses] = useState<Record<string, SaveStatus>>({});
   const [editingMap, setEditingMap] = useState<Record<string, number>>({});
   const [showSubmit, setShowSubmit] = useState(false);
+  const [showIndividual, setShowIndividual] = useState(false);
+  const [individualBusy, setIndividualBusy] = useState(false);
+  const [individualError, setIndividualError] = useState("");
   const restored = useRef(false);
 
   const sub = data?.submission ?? info.submission ?? { status: "draft", revision: 0, submittedAt: null };
-  const readOnly = sub.status === "submitted";
+  const individual = data?.individualSubmission ?? info.individualSubmission;
+  const groupSubmitted = sub.status === "submitted";
+  const ownSubmitted = individual?.status === "submitted";
+  const readOnly = groupSubmitted || ownSubmitted;
+
+  async function submitOwn() {
+    setIndividualBusy(true);
+    setIndividualError("");
+    try {
+      const result = await api<{ individualSubmission: Submission }>("POST", "/student/submit-individual", { part: info.part, confirm: true });
+      setData((current) => current && { ...current, individualSubmission: result.individualSubmission });
+      setShowIndividual(false);
+      toast("Your individual work was submitted");
+      refresh();
+      onChanged();
+    } catch (e) {
+      setIndividualError((e as ApiError).message);
+    } finally {
+      setIndividualBusy(false);
+    }
+  }
 
   // Restore any new entries that were typed but never reached the server (refresh / crash).
   useEffect(() => {
@@ -141,7 +165,7 @@ export function PartView({ info, entryTags, studentId, active, onChanged }: { in
         <GuidingQuestions qs={info.questions ?? []} />
       </div>
 
-      {info.part === 1 && (
+      {info.part === 1 && info.designTagHints !== undefined && (
         <details className="card">
           <summary className="cursor-pointer font-semibold text-blue-900">Design tag hints</summary>
           {info.designTagHints?.length ? (
@@ -166,6 +190,11 @@ export function PartView({ info, entryTags, studentId, active, onChanged }: { in
       {sub.status === "revising" && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="status">
           Your teacher has <b>reopened this part for revisions</b>. Make your changes, then submit again. Your earlier submission (revision {sub.revision}) is kept.
+        </div>
+      )}
+      {ownSubmitted && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900" role="status">
+          <b>Your individual work is submitted.</b> Your entries are read-only until your teacher reopens them. This is separate from the group submission.
         </div>
       )}
 
@@ -215,15 +244,30 @@ export function PartView({ info, entryTags, studentId, active, onChanged }: { in
         <div className="text-sm">
           {unsaved ? <span className="font-semibold text-amber-700">Saving your latest changes…</span> : <span className="text-slate-600">All your changes are saved.</span>}
         </div>
-        {readOnly ? (
-          <span className="badge bg-emerald-100 px-3 py-1 text-sm text-emerald-800">✓ Submitted</span>
-        ) : (
-          <button className="btn-accent" disabled={unsaved || !data || entryCount === 0} onClick={() => setShowSubmit(true)}>
-            Submit as a group…
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {ownSubmitted ? <span className="badge bg-blue-100 text-blue-900">My work submitted</span> : (
+            <button className="btn-primary" disabled={unsaved || !data?.entries.some((e) => e.mine) || individualBusy} onClick={() => { setIndividualError(""); setShowIndividual(true); }}>
+              Submit my work…
+            </button>
+          )}
+          {groupSubmitted ? <span className="badge bg-emerald-100 text-emerald-800">Group submitted</span> : (
+            <button className="btn-ghost" disabled={unsaved || !data || entryCount === 0} onClick={() => setShowSubmit(true)}>
+              Submit as a group…
+            </button>
+          )}
+        </div>
       </div>
 
+      {showIndividual && (
+        <Modal title={`Submit your own work for Part ${info.part}?`} onClose={() => { if (!individualBusy) setShowIndividual(false); }}>
+          <p className="text-sm text-slate-700">Only your entries will be submitted. Your teammates can keep working, and this won’t submit the group’s work.</p>
+          {individualError && <p className="mt-3 text-sm text-rose-700" role="alert">{individualError}</p>}
+          <div className="mt-5 flex flex-wrap justify-end gap-2">
+            <button className="btn-ghost" disabled={individualBusy} onClick={() => setShowIndividual(false)}>Cancel</button>
+            <button className="btn-primary" disabled={individualBusy || unsaved} onClick={submitOwn}>{individualBusy ? "Submitting…" : "Confirm my submission"}</button>
+          </div>
+        </Modal>
+      )}
       {showSubmit && (
         <SubmitDialog
           part={info.part}

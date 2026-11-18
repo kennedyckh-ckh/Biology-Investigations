@@ -40,11 +40,12 @@ export interface TEntry {
 }
 export interface StatusResp {
   status: string;
+  designHintsVisible: boolean;
   parts: { part: number; title: string; visibility: "hidden" | "visible" | "open" }[];
   groups: {
     id: number;
     name: string;
-    members: { id: number; name: string; class: string; classNo: string; online: boolean }[];
+    members: { id: number; name: string; class: string; classNo: string; online: boolean; individualSubmissions: { part: number; revision: number; status: "draft" | "submitted" | "revising" }[] }[];
     parts: { part: number; submission: { status: "draft" | "submitted" | "revising"; revision: number; submittedAt: number | null }; entryCount: number; editing: number }[];
   }[];
   summary: { part: number; activeGroups: number; submitted: number; missing: string[] }[];

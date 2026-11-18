@@ -67,6 +67,12 @@ export function submissionInfo(groupId: number, part: number): SubInfo {
   return { status: r.unlocked_at ? "revising" : "submitted", revision: num(r.revision), submittedAt: num(r.submitted_at) };
 }
 
+export function individualSubmissionInfo(studentId: number, part: number): SubInfo {
+  const r = get("SELECT revision,submitted_at,unlocked_at FROM individual_submissions WHERE student_id=? AND part=? ORDER BY revision DESC LIMIT 1", studentId, part);
+  if (!r) return { status: "draft", revision: 0, submittedAt: null };
+  return { status: r.unlocked_at ? "revising" : "submitted", revision: num(r.revision), submittedAt: num(r.submitted_at) };
+}
+
 /** The student may read a part only if it is open. Hidden or locked parts are denied on the server. */
 export function assertStudentCanRead(sc: StudentCtx, part: number) {
   const v = partVisibility(num(sc.session.id), part);
@@ -76,6 +82,13 @@ export function assertStudentCanEdit(sc: StudentCtx, part: number) {
   assertStudentCanRead(sc, part);
   if (submissionInfo(num(sc.group.id), part).status === "submitted")
     throw forbidden("Your group has already submitted this part. Ask your teacher to unlock it for revisions.", "part_submitted");
+}
+
+export function assertStudentCanEditOwnWork(sc: StudentCtx, part: number) {
+  assertStudentCanEdit(sc, part);
+  if (individualSubmissionInfo(num(sc.student.id), part).status === "submitted") {
+    throw forbidden("You already submitted your own work for this part. Ask your teacher to reopen it if you need to make changes.", "individual_submitted");
+  }
 }
 
 export function onlineEditors(groupId: number, part: number, exceptStudentId?: number) {

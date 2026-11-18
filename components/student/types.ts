@@ -29,6 +29,7 @@ export interface PartInfo {
   designTagHints?: DesignTagHint[];
   questions?: { id: number; text: string }[];
   submission?: Submission;
+  individualSubmission?: Submission;
   entryCount?: number;
 }
 export interface StateResp {

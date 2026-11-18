@@ -37,6 +37,7 @@ export function StaffShell({ role, children, crumbs }: { role: "teacher" | "educ
             <Link href={role === "teacher" ? "/teacher" : "/educator"} className="btn-ghost btn-sm">
               Dashboard
             </Link>
+            <Link href={`/${role}/api-usage`} className="btn-ghost btn-sm">API usage</Link>
             <button className="btn-ghost btn-sm" onClick={async () => { await api("POST", "/auth/logout").catch(() => {}); router.push("/"); }}>
               Sign out
             </button>
