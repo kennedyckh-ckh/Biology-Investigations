@@ -50,23 +50,23 @@ export default function Home() {
 
   return (
     <>
-      <header className="border-t-4 border-t-blue-900 border-b border-b-slate-200 bg-white">
+      <header className="platform-masthead">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-5 px-5 py-3 sm:px-8">
-          <BrandLogo className="w-48 sm:w-58" priority />
-          <p className="hidden border-l border-slate-200 pl-5 text-xs font-semibold tracking-wide text-slate-600 sm:block">Collaborative science inquiry platform</p>
+          <BrandLogo className="w-48 rounded-md bg-white px-2 py-0.5 sm:w-58" priority />
+          <p className="hidden border-l border-blue-600 pl-5 text-xs font-semibold tracking-wide text-blue-100 sm:block">Collaborative science inquiry platform</p>
         </div>
       </header>
       <main className="mx-auto grid max-w-6xl items-start gap-7 px-5 pt-8 pb-12 sm:px-8 sm:pt-12 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.9fr)] lg:gap-x-20 lg:gap-y-7 lg:pt-18">
           <div className="lg:col-start-1 lg:row-start-1">
-            <p className="flex items-center gap-2.5 text-xs font-semibold tracking-[0.15em] text-violet-700 uppercase">
-              <span className="h-px w-6 bg-violet-600" aria-hidden="true" /> Classroom workspace
+            <p className="flex items-center gap-2.5 text-xs font-semibold tracking-[0.15em] text-blue-700 uppercase">
+              <span className="h-px w-6 bg-blue-600" aria-hidden="true" /> Classroom workspace
             </p>
             <h1 className="mt-3 text-[2.1rem] leading-[1.12] font-bold tracking-tight text-blue-950 sm:text-5xl">Scientific Investigations</h1>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-slate-600 sm:mt-4 sm:text-base">
               Plan an investigation, collect evidence, and discuss what your findings support. Work together at each stage.
             </p>
           </div>
-          <section aria-label="Platform access" className="w-full overflow-hidden rounded-xl border border-slate-200 bg-white px-5 pt-5 pb-6 shadow-sm sm:px-7 sm:pt-6 sm:pb-7 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+          <section aria-label="Platform access" className="w-full overflow-hidden rounded-xl border border-blue-200 bg-white px-5 pt-5 pb-6 shadow-sm shadow-blue-950/10 sm:px-7 sm:pt-6 sm:pb-7 lg:col-start-2 lg:row-span-2 lg:row-start-1">
               <p className="mb-3 text-xs font-semibold tracking-[0.15em] text-slate-600 uppercase">Platform access</p>
               <div
                 className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 text-sm font-semibold"
@@ -141,7 +141,7 @@ export default function Home() {
               <ol className="mt-2 divide-y divide-slate-200">
                 {INQUIRY_STAGES.map((stage, i) => (
                   <li key={stage.title} className="flex items-start gap-3 py-3">
-                    <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-violet-100 text-xs font-semibold tabular-nums text-violet-800">{`0${i + 1}`}</span>
+                    <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-blue-100 text-xs font-semibold tabular-nums text-blue-800">{`0${i + 1}`}</span>
                     <div>
                       <p className="text-sm font-semibold text-slate-900">{stage.title}</p>
                       <p className="mt-0.5 text-sm leading-snug text-slate-600">{stage.desc}</p>

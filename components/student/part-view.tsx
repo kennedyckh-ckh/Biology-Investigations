@@ -14,14 +14,15 @@ interface EntriesResp {
   individualSubmission: Submission;
 }
 
-function GuidingQuestions({ qs }: { qs: { id: number; text: string }[] }) {
+function GuidingQuestions({ qs, task = false }: { qs: string[]; task?: boolean }) {
   if (!qs.length) return null;
   return (
-    <div className="mt-4 rounded-xl bg-violet-50 p-4">
-      <WorkspaceHeading as="h4" icon="question">Guiding questions</WorkspaceHeading>
-      <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-violet-950">
-        {qs.map((q) => (
-          <li key={q.id}>{q.text}</li>
+    <div className={task ? "mt-3 border-l-2 border-blue-400 bg-white/75 px-3 py-2" : "mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4"}>
+      {task ? <h6 className="flex items-center gap-2 text-sm font-semibold text-blue-950"><WorkspaceIcon name="question" className="h-4 w-4 text-blue-700" />Guiding questions</h6>
+        : <WorkspaceHeading as="h4" icon="question">Part-wide guiding questions</WorkspaceHeading>}
+      <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-blue-950">
+        {qs.map((q, i) => (
+          <li key={i} className="break-words">{q}</li>
         ))}
       </ol>
     </div>
@@ -108,10 +109,11 @@ export function StudentPartInstructions({ info }: { info: PartInfo }) {
       <div className="mt-4 space-y-3">
         <WorkspaceHeading as="h4" icon="task">Tasks</WorkspaceHeading>
         <ol className="space-y-2">
-          {info.instructionBlocks.map(({ id, title, text, webLink, attachment }, i) => (
+          {info.instructionBlocks.map(({ id, title, text, webLink, attachment, questions }, i) => (
             <li key={id} className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 sm:p-4">
               <h5 className="break-words text-sm font-semibold text-blue-950">Task {i + 1}{title ? `: ${title}` : ""}</h5>
               <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{text}</p>
+              <GuidingQuestions qs={questions} task />
               {attachment && <InstructionResource key={attachment.previewUrl ?? attachment.name} file={attachment} title={`Task ${i + 1} diagram${title ? `: ${title}` : ""}`} />}
               {webLink && <ResourceLink url={webLink} label="Open task resource" />}
             </li>
@@ -120,7 +122,7 @@ export function StudentPartInstructions({ info }: { info: PartInfo }) {
       </div>
     )}
     {!info.instructions && !info.instructionBlocks?.length && !info.attachment && !info.webLink && !info.questions?.length && <p className="mt-2 text-sm text-slate-600">No instructions yet.</p>}
-    <GuidingQuestions qs={info.questions ?? []} />
+    <GuidingQuestions qs={info.questions?.map((q) => q.text) ?? []} />
   </section>;
 }
 

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/client/api";
 import { Field, useToast } from "@/components/ui";
 import { LIMITS, PART_TITLES, TAGS, type InstructionFile } from "@/lib/constants";
@@ -251,7 +251,7 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
   async function save() {
     setBusy(true);
     try {
-      await api("PUT", `/teacher/sessions/${sessionId}/parts/${cfg.part}`, { instructions, instructionBlocks: blocks.map(({ id, title, text, webLink }) => ({ id, title, text, webLink })), webLink: link, questions: qs.filter((q) => q.trim()) });
+      await api("PUT", `/teacher/sessions/${sessionId}/parts/${cfg.part}`, { instructions, instructionBlocks: blocks.map(({ id, title, text, webLink, questions }) => ({ id, title, text, webLink, questions: questions.filter((q) => q.trim()) })), webLink: link, questions: qs.filter((q) => q.trim()) });
       setDirty(false);
       toast(`Part ${cfg.part} saved`);
       onSaved();
@@ -261,13 +261,6 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
       setBusy(false);
     }
   }
-  const move = (i: number, d: number) => {
-    const n = qs.slice();
-    const j = i + d;
-    if (j < 0 || j >= n.length) return;
-    [n[i], n[j]] = [n[j], n[i]];
-    touch(setQs)(n);
-  };
   return (
     <section className="card space-y-4">
       <div className="flex items-center justify-between">
@@ -302,6 +295,9 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
               <Field label="Task instructions">
                 <textarea className="input min-h-24" aria-label={`Task ${i + 1} instructions`} value={block.text} disabled={disabled || busy} maxLength={LIMITS.instructionTextMax} onChange={(e) => touch(setBlocks)(blocks.map((b, j) => j === i ? { ...b, text: e.target.value } : b))} />
               </Field>
+              <div className="rounded-lg border border-blue-100 bg-blue-50/70 p-3">
+                <QuestionList questions={block.questions} taskNumber={i + 1} disabled={disabled || busy} onChange={(questions) => touch(setBlocks)(blocks.map((b) => b.id === block.id ? { ...b, questions } : b))} />
+              </div>
               <Field label="Task external link (optional)">
                 <input className="input" aria-label={`Task ${i + 1} external link`} value={block.webLink} disabled={disabled || busy} placeholder="https://…" maxLength={500} onChange={(e) => touch(setBlocks)(blocks.map((b) => b.id === block.id ? { ...b, webLink: e.target.value } : b))} />
               </Field>
@@ -311,7 +307,7 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
             </li>
           ))}
         </ol>
-        <button type="button" className="btn-ghost btn-sm" disabled={disabled || busy || blocks.length >= LIMITS.instructionBlockCount} onClick={() => touch(setBlocks)([...blocks, { id: crypto.randomUUID(), title: "", text: "", webLink: "" }])}>+ Add task block</button>
+        <button type="button" className="btn-ghost btn-sm" disabled={disabled || busy || blocks.length >= LIMITS.instructionBlockCount} onClick={() => touch(setBlocks)([...blocks, { id: crypto.randomUUID(), title: "", text: "", webLink: "", questions: [] }])}>+ Add task block</button>
         {blocks.some((b) => !b.text.trim()) && <p className="text-xs text-slate-600">Fill in the instructions for every task or remove blank tasks before saving.</p>}
       </div>
       <details className="rounded-lg border border-slate-200 p-3">
@@ -323,32 +319,50 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
           <InstructionAttachment sessionId={sessionId} part={cfg.part} initial={cfg.attachment} onSaved={onSaved} disabled={disabled} />
         </div>
       </details>
-      <div>
-        <span className="label">Guiding questions</span>
-        <ol className="space-y-2">
-          {qs.map((q, i) => (
-            <li key={i} className="flex items-center gap-2">
-              <span className="w-5 text-right text-xs font-bold text-slate-400">{i + 1}</span>
-              <input className="input" value={q} onChange={(e) => touch(setQs)(qs.map((x, j) => (j === i ? e.target.value : x)))} disabled={disabled} maxLength={500} aria-label={`Guiding question ${i + 1}`} />
-              <button className="btn-ghost btn-sm" onClick={() => move(i, -1)} disabled={disabled || i === 0} aria-label="Move up">
-                ↑
-              </button>
-              <button className="btn-ghost btn-sm" onClick={() => move(i, 1)} disabled={disabled || i === qs.length - 1} aria-label="Move down">
-                ↓
-              </button>
-              <button className="btn-ghost btn-sm text-rose-700" onClick={() => touch(setQs)(qs.filter((_, j) => j !== i))} disabled={disabled} aria-label="Remove question">
-                ✕
-              </button>
-            </li>
-          ))}
-        </ol>
-        <button className="btn-ghost btn-sm mt-2" disabled={disabled || qs.length >= 20} onClick={() => touch(setQs)([...qs, ""])}>
-          + Add question
-        </button>
-      </div>
+      <QuestionList questions={qs} disabled={disabled || busy} onChange={touch(setQs)} />
       <button className="btn-primary" disabled={busy || disabled || !dirty || blocks.some((b) => !b.text.trim())} onClick={save}>
         {busy ? "Saving…" : `Save Part ${cfg.part}`}
       </button>
     </section>
   );
+}
+
+function QuestionList({ questions, onChange, disabled, taskNumber }: {
+  questions: string[]; onChange: (questions: string[]) => void; disabled: boolean; taskNumber?: number;
+}) {
+  const scope = taskNumber === undefined ? "Part-wide" : `Task ${taskNumber}`;
+  const lastInput = useRef<HTMLInputElement>(null);
+  const focusAddedQuestion = useRef(false);
+  useEffect(() => {
+    if (!focusAddedQuestion.current) return;
+    focusAddedQuestion.current = false;
+    lastInput.current?.focus();
+  }, [questions.length]);
+  function move(i: number, offset: number) {
+    const next = questions.slice();
+    const j = i + offset;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  }
+  return <fieldset className="min-w-0">
+    <legend className="label">{taskNumber === undefined ? "Part-wide guiding questions" : "Guiding questions for this task"}</legend>
+    <ol className="space-y-2">
+      {questions.map((q, i) => (
+        <li key={i} className="flex flex-wrap items-center gap-1.5 sm:flex-nowrap">
+          <span aria-hidden="true" className="w-4 shrink-0 text-center text-xs font-semibold text-slate-600">{i + 1}</span>
+          <input ref={i === questions.length - 1 ? lastInput : undefined} className="input min-w-0 basis-[calc(100%_-_1.5rem)] sm:basis-auto" value={q} onChange={(e) => onChange(questions.map((x, j) => j === i ? e.target.value : x))} disabled={disabled} maxLength={LIMITS.guidingQuestionMax} aria-label={`${scope} guiding question ${i + 1}`} />
+          <div className="ml-5 flex shrink-0 gap-1 sm:ml-0">
+            <button type="button" className="btn-ghost btn-sm" disabled={disabled || i === 0} aria-label={`${scope}: move question ${i + 1} up`} onClick={() => move(i, -1)}>↑</button>
+            <button type="button" className="btn-ghost btn-sm" disabled={disabled || i === questions.length - 1} aria-label={`${scope}: move question ${i + 1} down`} onClick={() => move(i, 1)}>↓</button>
+            <button type="button" className="btn-ghost btn-sm text-rose-700" disabled={disabled} aria-label={`${scope}: remove question ${i + 1}`} onClick={() => onChange(questions.filter((_, j) => j !== i))}>✕</button>
+          </div>
+        </li>
+      ))}
+    </ol>
+    <button type="button" className="btn-ghost btn-sm mt-2" disabled={disabled || questions.length >= LIMITS.taskQuestionCount} onClick={() => {
+      focusAddedQuestion.current = true;
+      onChange([...questions, ""]);
+    }}>{taskNumber === undefined ? "+ Add part-wide question" : "+ Add guiding question"}</button>
+  </fieldset>;
 }

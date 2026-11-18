@@ -16,7 +16,7 @@ export const TAGS = [
 export type Tag = (typeof TAGS)[number];
 export type PeerReaction = "like" | "heart";
 export interface InstructionFile { name: string; size: number; url: string; previewUrl: string | null }
-export interface InstructionBlock { id: string; title: string; text: string; webLink: string; attachment?: InstructionFile | null }
+export interface InstructionBlock { id: string; title: string; text: string; webLink: string; questions: string[]; attachment?: InstructionFile | null }
 export interface DesignTagHint { tag: string; hint: string }
 
 export const PART_TITLES: Record<number, string> = {
@@ -50,6 +50,8 @@ export const LIMITS = {
   instructionBlockCount: 12,
   instructionTitleMax: 120,
   instructionTextMax: 5000,
+  guidingQuestionMax: 500,
+  taskQuestionCount: 20,
   entryTagMax: 60,
   entryTagCount: 30,
   designHintMax: 500,

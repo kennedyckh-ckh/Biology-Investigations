@@ -183,7 +183,7 @@ route("PUT", "/teacher/sessions/:id/parts/:n", (ctx) => {
   const instructions = str(b.instructions, LIMITS.instructionTextMax, "Instructions", { optional: true });
   const link = safeLink(b.webLink);
   if (!Array.isArray(b.questions)) throw bad("Guiding questions must be a list");
-  const qs = (b.questions as unknown[]).map((q) => str(q, 500, "Guiding question", { optional: true })).filter(Boolean);
+  const qs = (b.questions as unknown[]).map((q) => str(q, LIMITS.guidingQuestionMax, "Guiding question", { optional: true })).filter(Boolean);
   if (qs.length > 20) throw bad("At most 20 guiding questions per part");
   const sid = num(s.id);
   let blocks: InstructionBlock[] | undefined;
@@ -195,15 +195,21 @@ route("PUT", "/teacher/sessions/:id/parts/:n", (ctx) => {
     const ids = new Set<string>();
     blocks = (b.instructionBlocks as unknown[]).map((block, i) => {
       if (!block || typeof block !== "object") throw bad("Invalid task block.");
-      const value = block as { id?: unknown; title?: unknown; text?: unknown; webLink?: unknown };
+      const value = block as { id?: unknown; title?: unknown; text?: unknown; webLink?: unknown; questions?: unknown };
       const id = value.id === undefined ? previous[i]?.id ?? randomUUID() : value.id;
       if (typeof id !== "string" || (!previous.some((p) => p.id === id) && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) || ids.has(id)) throw bad("Each task must have a unique ID.");
       ids.add(id);
+      const prior = previous.find((p) => p.id === id);
+      const questions = value.questions === undefined ? prior?.questions ?? [] : value.questions;
+      if (!Array.isArray(questions) || questions.length > LIMITS.taskQuestionCount) {
+        throw bad(`Use a list of up to ${LIMITS.taskQuestionCount} guiding questions per task.`);
+      }
       return {
         id,
         title: str(value.title, LIMITS.instructionTitleMax, "Task heading", { optional: true }),
         text: str(value.text, LIMITS.instructionTextMax, "Task instructions"),
-        webLink: value.webLink === undefined ? previous.find((p) => p.id === id)?.webLink ?? "" : safeLink(value.webLink),
+        webLink: value.webLink === undefined ? prior?.webLink ?? "" : safeLink(value.webLink),
+        questions: (questions as unknown[]).map((q) => str(q, LIMITS.guidingQuestionMax, "Task guiding question", { optional: true })).filter(Boolean),
       };
     });
   }

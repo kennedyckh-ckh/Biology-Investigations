@@ -92,9 +92,9 @@ function Inner({ id }: { id: string }) {
       </div>
       {archived && <div className="mb-4 rounded-xl bg-amber-100 p-3 text-sm font-medium text-amber-900">This session is archived: read-only for you, closed to students. Restore it to make changes, or delete it permanently.</div>}
 
-      <nav className="mb-6 flex gap-1 overflow-x-auto border-b border-slate-200" aria-label="Session sections">
+      <nav className="mb-6 flex gap-1 overflow-x-auto rounded-t-lg border-b border-blue-200 bg-white" aria-label="Session sections">
         {TABS.map(([k, label]) => (
-          <button key={k} onClick={() => setTab(k)} className={`whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold ${tab === k ? "border-blue-700 text-blue-800" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+          <button key={k} onClick={() => setTab(k)} aria-current={tab === k ? "page" : undefined} className={`whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold ${tab === k ? "border-blue-700 bg-blue-50 text-blue-900" : "border-transparent text-slate-600 hover:bg-blue-50 hover:text-blue-900"}`}>
             {label}
           </button>
         ))}
