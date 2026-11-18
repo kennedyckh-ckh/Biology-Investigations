@@ -11,6 +11,7 @@
     "test:ai": "node scripts/test-ai.mjs",
     "test:unit": "tsx scripts/test-ai-unit.ts",
     "test:api-budget": "tsx scripts/test-api-budget.ts",
+    "test:reaction-ranking": "tsx scripts/test-reaction-ranking.ts",
     "seed:demo": "node scripts/seed-demo.mjs"
   },
   "engines": {

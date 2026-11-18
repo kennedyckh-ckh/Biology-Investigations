@@ -62,9 +62,9 @@ export function instructionBlocksFor(sessionId: number, part: number, prefix?: s
   if (!saved) return [];
   const blocks = JSON.parse(String(saved.blocks_json)) as InstructionBlock[];
   const files = prefix && blocks.length ? taskAttachmentInfo(sessionId, part, prefix) : null;
-  return blocks.map(({ id, title, text, webLink }, i) => {
+  return blocks.map(({ id, title, text, webLink, questions }, i) => {
     const taskId = id ?? `legacy-${i + 1}`;
-    return { id: taskId, title, text, webLink: webLink ?? "", ...(prefix ? { attachment: files?.get(taskId) ?? null } : {}) };
+    return { id: taskId, title, text, webLink: webLink ?? "", questions: questions ?? [], ...(prefix ? { attachment: files?.get(taskId) ?? null } : {}) };
   });
 }
 

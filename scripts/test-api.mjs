@@ -137,17 +137,31 @@ async function main() {
   const sessionBase = `/teacher/sessions/${sid}`;
   section("Ordered instruction blocks");
   const partEdit = { instructions: "CUSTOMISED by teacher", webLink: "https://example.org/p1", questions: ["Custom Q1", "Custom Q2"] };
-  const blocks = [{ title: "Predict", text: "Record a prediction.", webLink: "https://example.org/predict" }, { title: "", text: "Explain your reasoning.", webLink: "https://example.org/explain" }];
-  const taskContent = (items) => items.map(({ title, text, webLink }) => ({ title, text, webLink }));
+  const blocks = [
+    { title: "Predict", text: "Record a prediction.", webLink: "https://example.org/predict", questions: ["What do you predict?", "Why?"] },
+    { title: "", text: "Explain your reasoning.", webLink: "https://example.org/explain", questions: ["What evidence supports your reasoning?"] },
+  ];
+  const taskContent = (items) => items.map(({ title, text, webLink, questions }) => ({ title, text, webLink, questions }));
   eq("existing part starts with no task blocks", (await api(t1, "GET", sessionBase)).json.parts[0].instructionBlocks.length, 0);
   eq("another teacher cannot add blocks", (await api(t2, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: blocks })).status, 404);
   eq("teacher saves ordered task blocks", (await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: blocks })).status, 200);
   eq("teacher cannot save a blank block", (await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: [{ title: "Empty", text: " " }] })).status, 400);
   eq("too many blocks rejected", (await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: Array(13).fill(blocks[0]) })).status, 400);
   eq("an older client can save instructions without removing the blocks", (await api(t1, "PUT", `${sessionBase}/parts/1`, partEdit)).status, 200);
+  const oldTasks = blocks.map(({ title, text, webLink }) => ({ title, text, webLink }));
+  eq("an older task editor cannot erase guiding questions by omitting them", (await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: oldTasks })).json.parts[0].instructionBlocks[0].questions.join("|"), blocks[0].questions.join("|"));
+  const putQuestions = (questions) => api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: [{ ...blocks[0], questions }, blocks[1]] });
+  eq("task question field must be a list", (await putQuestions("not a list")).status, 400);
+  eq("task question item must be text", (await putQuestions([42])).status, 400);
+  eq("task question length is limited", (await putQuestions(["q".repeat(501)])).status, 400);
+  eq("task question count is limited", (await putQuestions(Array(21).fill("Question?"))).status, 400);
+  const cleared = (await putQuestions([])).json.parts[0].instructionBlocks;
+  check("clearing one task's questions leaves the other task untouched", cleared[0].questions.length === 0 && cleared[1].questions[0] === blocks[1].questions[0]);
+  eq("task question text is trimmed and empty entries ignored", (await putQuestions(["  ", " What do you predict? ", "Why?"])).json.parts[0].instructionBlocks[0].questions.join("|"), blocks[0].questions.join("|"));
   eq("teacher can prepare blocks for a locked part", (await api(t1, "PUT", `${sessionBase}/parts/2`, { ...partEdit, instructionBlocks: blocks })).status, 200);
   const tasksState = (await api(s1, "GET", "/student/state")).json;
-  eq("students receive ordered blocks with their own links", JSON.stringify(taskContent(tasksState.parts[0].instructionBlocks)), JSON.stringify(blocks));
+  eq("students receive ordered blocks with their own links and questions", JSON.stringify(taskContent(tasksState.parts[0].instructionBlocks)), JSON.stringify(blocks));
+  eq("part-wide questions remain separate from task questions", tasksState.parts[0].questions[0].text, "Custom Q1");
   eq("students still receive the existing overview", tasksState.parts[0].instructions, partEdit.instructions);
   check("locked parts do not expose task blocks", !("instructionBlocks" in tasksState.parts[1]));
   const upload = async (who, part, text, name = "Class guide.pdf", taskId) => fetch(`${BASE}/api${sessionBase}/parts/${part}${taskId ? `/tasks/${taskId}` : ""}/attachment`, {
@@ -192,11 +206,13 @@ async function main() {
   eq("teacher can read but not edit via preview endpoint", (await api(t1, "PUT", preview, {})).status, 405);
   eq("owner preview streams open task diagrams", (await api(t1, "GET", `${preview}${taskPath(1, taskIds[0])}`)).headers.get("content-type"), "image/png");
   const studentPreview = (await api(t1, "GET", preview)).json;
+  eq("teacher's Student view shows the same task questions", JSON.stringify(studentPreview.parts[0].instructionBlocks[0].questions), JSON.stringify(blocks[0].questions));
   check("preview includes open task content and strips locked tasks and private group state", studentPreview.parts[0].instructionBlocks[0].attachment.name === "First diagram.png" && studentPreview.parts[1].locked && !studentPreview.parts[1].instructionBlocks && !studentPreview.group);
   await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: savedTasks.slice().reverse() });
   const reordered = (await api(s1, "GET", "/student/state")).json.parts[0].instructionBlocks;
   check("task diagrams and links follow their block when reordered", reordered[0].id === taskIds[1] && reordered[0].attachment.name === "Second diagram.png"
     && reordered[0].webLink === blocks[1].webLink && reordered[1].attachment.name === "First diagram.png" && reordered[1].webLink === blocks[0].webLink);
+  check("questions follow their tasks and keep question order", reordered[0].questions[0] === blocks[1].questions[0] && JSON.stringify(reordered[1].questions) === JSON.stringify(blocks[0].questions));
   await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: savedTasks });
   eq("teacher can clear the task blocks explicitly", (await api(t1, "PUT", `${sessionBase}/parts/2`, { ...partEdit, instructionBlocks: [] })).json.parts[1].instructionBlocks.length, 0);
   eq("removed tasks no longer have a diagram", (await api(t1, "GET", `${sessionBase}${taskPath(2, lockedId)}`)).status, 404);
@@ -401,6 +417,8 @@ async function main() {
   eq("repeating the same request does not double count", (await api(s3, "PUT", reactionPath, { reaction: "like" })).json.reactions?.like, 1);
   const swap = (await api(s3, "PUT", reactionPath, { reaction: "heart" })).json.reactions;
   check("heart replaces a like instead of adding another reaction", swap.heart === 1 && swap.like === 0 && swap.mine === "heart");
+  const teacherReactions = (await api(t1, "GET", `${sessionBase}/shares`)).json.shares.find((s) => s.shareId === cls.shares[0].shareId)?.reactions;
+  check("teacher ranking receives matching aggregate star and heart counts", teacherReactions?.like === 0 && teacherReactions.heart === 1 && teacherReactions.mine === null);
   const authorReactions = (await api(s1, "GET", "/student/class")).json.shares[0].reactions;
   check("other students see only totals and their own selection", authorReactions.heart === 1 && authorReactions.mine === null && Object.keys(authorReactions).length === 3);
   eq("student can undo a reaction", (await api(s3, "PUT", reactionPath, { reaction: null })).json.reactions?.heart, 0);
@@ -462,7 +480,7 @@ async function main() {
   check("CSV has student name/class/class no/tag/stage", /Alice Lee/.test(csv.text) && /"8A"/.test(csv.text) && /Hypothesis/.test(csv.text) && /Part 1: Designing/.test(csv.text));
   check("CSV neutralises spreadsheet formulas", csv.text.includes("\"'=HYPERLINK"));
   const js = (await api(t1, "GET", `/teacher/sessions/${sid}/export?format=json`)).json;
-  eq("JSON export includes the ordered task blocks and links", JSON.stringify(taskContent(js.stages[0].instructionBlocks)), JSON.stringify(blocks));
+  eq("JSON export includes the ordered task blocks, links and questions", JSON.stringify(taskContent(js.stages[0].instructionBlocks)), JSON.stringify(blocks));
   check("JSON export has stages, questions and entries", js.stages.length === 3 && js.stages[0].guidingQuestions[0] === "Custom Q1" && js.entries.length >= 4);
   eq("other teacher cannot export", (await api(t2, "GET", `/teacher/sessions/${sid}/export?format=json`)).status, 404);
   eq("educator cannot export", (await api(ed, "GET", `/teacher/sessions/${sid}/export?format=json`)).status, 403);

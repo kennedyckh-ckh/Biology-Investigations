@@ -37,12 +37,14 @@ The four `INITIAL_…` values are only used to create the first two staff accoun
 - Students can join as new without approval, even if their details match another student's. They can choose **Recover my previous work on a new device** instead; that separate action still verifies a group PIN or requires teacher approval.
 
 - In **Setup**, use **Add task block** to create up to 12 ordered tasks in each part. Add an external link inside a task, then save the part to enable diagram uploads. Each task can have one PNG, JPEG, WebP or GIF diagram up to 500 MB. Links and diagrams follow their tasks when reordered. Students see a compact diagram and can select **Enlarge diagram** for a closer look.
+- Within a task, select **Add guiding question** to write up to 20 optional questions in order. They appear inside that task for students and in Student view. Existing part-wide guiding questions stay separate.
 - **Shared part resources** are separate from the tasks. Existing part-level links and files are preserved. A general supporting file can still be uploaded for the whole part.
 - Select **Student view** in the teacher’s session header to check open and locked parts, released hints, entry tags and the Class board. The preview is read-only and does not join a group or show private group work.
 - In **Setup → Session settings → Customise entry tags**, edit the list one tag per line, then click **Save settings**. Defaults apply until customised. Existing entries retain their original tags.
 - In **Setup → Session settings**, add or rename peer critique prompts and write and save **Design entry-tag hints**. Click **Live monitor → Show design tag hints** to release the hints, or **Hide design tag hints** to withdraw them. In open Part 1, students click **Entry-tag hints** beside **Group entries** to read the released hints one at a time.
 - Students can click **Submit my work** for each open part. It submits only their own entries and does not submit or lock classmates' work. Teachers can review and reopen individual submissions under **Live monitor → Group progress**. Group submission is still a separate action.
 - In **Class board**, students can select **Enlarge response** to read a peer’s shared text, image and table in a larger view. They can Star or Heart the response. Selecting the same reaction again removes it. Only aggregate counts and the student's own selection are shown, not the names of students who reacted.
+- In the teacher’s **Sharing** tab, choose **Most stars**, **Most hearts** or **Total reactions** to rank published responses. Ties share the same rank. This does not change the order on the student Class board or projector.
 
 ## AI API usage and limits
 

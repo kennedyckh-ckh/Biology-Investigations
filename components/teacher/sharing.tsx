@@ -1,6 +1,9 @@
 "use client";
+import { useState } from "react";
 import { api, usePoll, ApiError } from "@/lib/client/api";
 import { EntryBody, TagBadge, Spinner, ErrorBox, Empty, useToast } from "@/components/ui";
+import { ReactionIcon } from "@/components/reaction-icon";
+import { rankSharedResponses, type ReactionOrder } from "@/lib/reaction-ranking";
 import type { SessionDetail, TEntry } from "./types";
 
 interface SharesResp {
@@ -16,10 +19,19 @@ interface SharesResp {
   }[];
 }
 
+const orders: { value: ReactionOrder; label: string }[] = [
+  { value: "shared", label: "Shared order" },
+  { value: "stars", label: "Most stars" },
+  { value: "hearts", label: "Most hearts" },
+  { value: "total", label: "Total reactions" },
+];
+
 export function Sharing({ session, onSaved }: { session: SessionDetail; onSaved: () => void }) {
   const toast = useToast();
   const { data, error, loading, refresh } = usePoll<SharesResp>(`/teacher/sessions/${session.id}/shares`, 6000);
   const archived = session.status === "archived";
+  const [order, setOrder] = useState<ReactionOrder>("shared");
+  const ranked = rankSharedResponses(data?.shares ?? [], order);
 
   async function setAnon(v: boolean) {
     try {
@@ -66,14 +78,35 @@ export function Sharing({ session, onSaved }: { session: SessionDetail; onSaved:
 
       {loading && !data && <Spinner />}
       {error && !data && <ErrorBox message={error.message} onRetry={refresh} />}
+      {error && data && <ErrorBox message="Reaction counts could not refresh. Showing the last update." onRetry={refresh} />}
       {data && data.shares.length === 0 && <Empty>Nothing is shared yet. Open the Contributions tab and choose entries to share.</Empty>}
+      {ranked.length > 0 && (
+        <section className="card space-y-3 border-blue-200 bg-blue-50/80" aria-labelledby="shared-ranking">
+          <div>
+            <h3 id="shared-ranking" className="text-lg font-semibold text-blue-950">Rank shared responses</h3>
+            <p className="mt-1 text-sm text-slate-600">Ranking changes only this teacher view. Responses with the same count share a rank.</p>
+          </div>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Rank shared responses">
+            {orders.map(({ value, label }) => (
+              <button key={value} type="button" aria-pressed={order === value} className={`${order === value ? "btn-primary" : "btn-ghost"} btn-sm min-h-9`} onClick={() => setOrder(value)}>
+                {value === "stars" && <ReactionIcon reaction="like" className="h-4 w-4" />}
+                {value === "hearts" && <ReactionIcon reaction="heart" className="h-4 w-4" />}
+                {label}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="grid gap-4 lg:grid-cols-2">
-        {data?.shares.map((s) => (
-          <article key={s.shareId} className="card space-y-3">
+        {ranked.map(({ item: s, rank }) => (
+          <article key={s.shareId} className="card min-w-0 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-xs uppercase tracking-wide text-slate-500">The class sees</div>
-                <div className="font-bold text-violet-800">{s.publicLabel}</div>
+                <div className="flex flex-wrap items-center gap-2 font-bold text-blue-950">
+                  {rank !== null && <span className="badge bg-blue-100 font-semibold text-blue-900">Rank {rank}</span>}
+                  <span className="break-words">{s.publicLabel}</span>
+                </div>
                 <div className="text-xs text-slate-500">
                   (Only you can see: {s.groupName} · {s.entry.author.name} {s.entry.author.class}/{s.entry.author.classNo})
                 </div>
@@ -88,7 +121,11 @@ export function Sharing({ session, onSaved }: { session: SessionDetail; onSaved:
               </div>
             </div>
             <EntryBody body={s.entry.body} hasImage={s.entry.hasImage} entryId={s.entry.id} table={s.entry.table} />
-            <p className="text-xs text-slate-600">Stars: {s.reactions.like} · Hearts: {s.reactions.heart}</p>
+            <div className="flex flex-wrap gap-2 text-xs font-medium tabular-nums">
+              <span className="badge gap-1.5 bg-amber-50 text-amber-900"><ReactionIcon reaction="like" className="h-4 w-4" /> Stars: {s.reactions.like}</span>
+              <span className="badge gap-1.5 bg-rose-50 text-rose-900"><ReactionIcon reaction="heart" className="h-4 w-4" /> Hearts: {s.reactions.heart}</span>
+              {order === "total" && <span className="badge bg-blue-100 text-blue-900">Total: {s.reactions.like + s.reactions.heart}</span>}
+            </div>
             {s.critiques.length > 0 && (
               <div className="border-t border-slate-100 pt-3">
                 <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Peer critiques ({s.critiques.length})</div>
