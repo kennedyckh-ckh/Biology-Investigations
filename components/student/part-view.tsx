@@ -25,7 +25,7 @@ function GuidingQuestions({ qs }: { qs: { id: number; text: string }[] }) {
   );
 }
 
-export function PartView({ info, studentId, active, onChanged }: { info: PartInfo; studentId: number; active: boolean; onChanged: () => void }) {
+export function PartView({ info, entryTags, studentId, active, onChanged }: { info: PartInfo; entryTags: readonly string[]; studentId: number; active: boolean; onChanged: () => void }) {
   const toast = useToast();
   const { data, error, loading, refresh, setData } = usePoll<EntriesResp>(info.locked ? null : `/student/entries?part=${info.part}`, active ? 4000 : 0);
   const [drafts, setDrafts] = useState<{ key: string; entry: Entry | null }[]>([]);
@@ -137,6 +137,7 @@ export function PartView({ info, studentId, active, onChanged }: { info: PartInf
             🔗 Open the web resource <span className="font-normal text-slate-400">(new tab)</span>
           </a>
         )}
+        {info.attachment && <div className="mt-3"><a className="btn-ghost btn-sm max-w-full break-all" href={info.attachment.url} download>Download instruction file: {info.attachment.name}</a></div>}
         <GuidingQuestions qs={info.questions ?? []} />
       </div>
 
@@ -167,9 +168,9 @@ export function PartView({ info, studentId, active, onChanged }: { info: PartInf
           <div className="grid gap-4 lg:grid-cols-2">
             {[...drafts.map((d) => ({ kind: "draft" as const, d })), ...mineFromServer.map((e) => ({ kind: "mine" as const, e }))].map((x) =>
               x.kind === "draft" ? (
-                <EntryEditor key={x.d.key} part={info.part} studentId={studentId} entry={x.d.entry} draftKey={x.d.key} readOnly={readOnly} onSaved={(e) => { setDrafts((ds) => ds.map((d) => (d.key === x.d.key ? { ...d, entry: e } : d))); onSaved(e); }} onDeleted={onDeleted} onStatus={onStatus} onEditing={onEditing} />
+                <EntryEditor key={x.d.key} part={info.part} entryTags={entryTags} studentId={studentId} entry={x.d.entry} draftKey={x.d.key} readOnly={readOnly} onSaved={(e) => { setDrafts((ds) => ds.map((d) => (d.key === x.d.key ? { ...d, entry: e } : d))); onSaved(e); }} onDeleted={onDeleted} onStatus={onStatus} onEditing={onEditing} />
               ) : (
-                <EntryEditor key={`e-${x.e.id}`} part={info.part} studentId={studentId} entry={x.e} draftKey={`e${x.e.id}`} readOnly={readOnly} onSaved={onSaved} onDeleted={onDeleted} onStatus={onStatus} onEditing={onEditing} />
+                <EntryEditor key={`e-${x.e.id}`} part={info.part} entryTags={entryTags} studentId={studentId} entry={x.e} draftKey={`e${x.e.id}`} readOnly={readOnly} onSaved={onSaved} onDeleted={onDeleted} onStatus={onStatus} onEditing={onEditing} />
               )
             )}
             {others.map((e) => (

@@ -26,10 +26,11 @@ interface Route {
   re: RegExp;
   keys: string[];
   handler: Handler;
+  binary: boolean;
 }
 const routes: Route[] = [];
 
-export function route(method: string, pattern: string, handler: Handler) {
+export function route(method: string, pattern: string, handler: Handler, opts?: { binary: boolean }) {
   const keys: string[] = [];
   const re = new RegExp(
     "^" +
@@ -39,7 +40,7 @@ export function route(method: string, pattern: string, handler: Handler) {
       }) +
       "/?$"
   );
-  routes.push({ method, re, keys, handler });
+  routes.push({ method, re, keys, handler, binary: opts?.binary ?? false });
 }
 
 export async function dispatch(req: Request, pathname: string): Promise<Response> {
@@ -68,13 +69,19 @@ export async function dispatch(req: Request, pathname: string): Promise<Response
     if (method !== "GET" && method !== "HEAD") {
       // JSON-only mutations: a cross-site form post cannot send this content type, which blocks CSRF.
       const ct = req.headers.get("content-type") || "";
-      if (!ct.toLowerCase().startsWith("application/json")) throw new HttpError(415, "unsupported_media_type", "JSON required");
-      const text = await req.text();
-      if (text.length > 6 * 1024 * 1024) throw new HttpError(413, "too_large", "Request too large");
-      try {
-        body = text ? JSON.parse(text) : {};
-      } catch {
-        throw bad("Invalid JSON");
+      if (matched.binary) {
+        if (ct.toLowerCase() !== "application/octet-stream" || !req.headers.has("x-instruction-filename")) {
+          throw new HttpError(415, "unsupported_media_type", "A binary file with a filename is required.");
+        }
+      } else {
+        if (!ct.toLowerCase().startsWith("application/json")) throw new HttpError(415, "unsupported_media_type", "JSON required");
+        const text = await req.text();
+        if (text.length > 6 * 1024 * 1024) throw new HttpError(413, "too_large", "Request too large");
+        try {
+          body = text ? JSON.parse(text) : {};
+        } catch {
+          throw bad("Invalid JSON");
+        }
       }
     }
     const ctx: Ctx = {

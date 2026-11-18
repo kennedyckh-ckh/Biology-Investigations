@@ -9,8 +9,9 @@ import {
   onlineEditors,
 } from "../authz";
 import { entriesWhere, validateTag, validateTable, saveImage, deleteImageFile, readImage } from "../entries";
-import { questionsFor } from "../sessions";
-import { publishedShares, publishedAi, critiquePromptsOf } from "../sharing";
+import { entryTagsFor, questionsFor } from "../sessions";
+import { publishedShares, publishedAi, critiquePromptsOf, reactionsFor } from "../sharing";
+import { attachmentInfo, attachmentRow, downloadInstructionFile } from "../instruction-files";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS } from "../constants";
 
 route("GET", "/student/state", (ctx) => {
@@ -28,6 +29,7 @@ route("GET", "/student/state", (ctx) => {
         ...base,
         instructions: String(p.instructions),
         webLink: String(p.web_link),
+        attachment: attachmentInfo(sid, part),
         questions: questionsFor(sid, part),
         submission: submissionInfo(gid, part),
         entryCount: num(get("SELECT COUNT(*) AS n FROM entries WHERE group_id=? AND part=? AND deleted_at IS NULL", gid, part)!.n),
@@ -47,8 +49,16 @@ route("GET", "/student/state", (ctx) => {
     session: { title: sc.session.title, archived: sc.session.status !== "active" },
     group: { id: gid, name: sc.group.name, members },
     parts,
+    entryTags: entryTagsFor(sid),
     serverTime: now(),
   };
+});
+
+route("GET", "/student/parts/:n/attachment", (ctx) => {
+  const sc = requireStudent(ctx);
+  const part = partNo(ctx.params.n);
+  assertStudentCanRead(sc, part);
+  return downloadInstructionFile(attachmentRow(num(sc.session.id), part));
 });
 
 route("GET", "/student/entries", (ctx) => {
@@ -72,7 +82,7 @@ route("POST", "/student/entries", (ctx) => {
   const b = ctx.body || {};
   const part = partNo(b.part);
   assertStudentCanEdit(sc, part);
-  const tag = validateTag(b.tag);
+  const tag = validateTag(b.tag, entryTagsFor(num(sc.session.id)));
   const body = bodyText(b.body);
   const table = validateTable(b.table);
   const image = b.image ? saveImage(b.image) : null;
@@ -110,7 +120,7 @@ route("PATCH", "/student/entries/:id", (ctx) => {
   const vals: unknown[] = [];
   if ("tag" in b) {
     sets.push("tag=?");
-    vals.push(validateTag(b.tag));
+    vals.push(validateTag(b.tag, entryTagsFor(num(sc.session.id)), e.tag));
   }
   if ("body" in b) {
     sets.push("body=?");
@@ -247,6 +257,24 @@ route("POST", "/student/critiques", (ctx) => {
   if (n >= 5) throw bad("You have added the maximum number of critiques to this response.");
   const id = run("INSERT INTO critiques(share_id,student_id,prompt_key,body,created_at) VALUES(?,?,?,?,?)", shareId, num(sc.student.id), prompt.key, body, now()).id;
   return { id };
+});
+
+route("PUT", "/student/shares/:id/reaction", (ctx) => {
+  const sc = requireStudent(ctx);
+  const id = int(ctx.params.id, "Share ID");
+  const share = get(
+    "SELECT e.student_id FROM shares sh JOIN entries e ON e.id=sh.entry_id WHERE sh.id=? AND sh.session_id=? AND e.deleted_at IS NULL",
+    id, num(sc.session.id)
+  );
+  if (!share) throw notFound("That response is not shared with your class.");
+  const studentId = num(sc.student.id);
+  if (num(share.student_id) === studentId) throw forbidden("You can only react to classmates' responses.");
+  const reaction = ctx.body?.reaction;
+  if (reaction === null) run("DELETE FROM share_reactions WHERE share_id=? AND student_id=?", id, studentId);
+  else if (reaction === "like" || reaction === "heart") {
+    run("INSERT INTO share_reactions(share_id,student_id,reaction) VALUES(?,?,?) ON CONFLICT(share_id,student_id) DO UPDATE SET reaction=excluded.reaction", id, studentId, reaction);
+  } else throw bad("Choose Like or Heart.");
+  return { reactions: reactionsFor(id, studentId) };
 });
 
 route("DELETE", "/student/critiques/:id", (ctx) => {

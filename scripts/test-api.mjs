@@ -119,6 +119,42 @@ async function main() {
   eq("student joins group A", (await join(s1, "Alice Lee", "1", gA)).status, 200);
   eq("second student joins group A", (await join(s2, "Bob Tam", "2", gA)).status, 200);
   eq("student joins group B", (await join(s3, "Cara Ng", "3", gB)).status, 200);
+  const sessionBase = `/teacher/sessions/${sid}`;
+  const upload = async (who, part, text, name = "Class guide.pdf") => fetch(`${BASE}/api${sessionBase}/parts/${part}/attachment`, {
+    method: "PUT",
+    headers: { Cookie: Object.entries(who.cookies).map(([k, v]) => `${k}=${v}`).join("; "), "Content-Type": "application/octet-stream", "X-Instruction-Filename": encodeURIComponent(name) },
+    body: text,
+  });
+  section("Task instruction attachments");
+  eq("other teacher cannot upload a task file", (await upload(t2, 1, "not allowed")).status, 404);
+  eq("student cannot upload a task file", (await upload(s1, 1, "not allowed")).status, 401);
+  eq("teacher attaches one file to Part 1", (await upload(t1, 1, "Class guide")).status, 200);
+  eq("teacher can attach a file before a part opens", (await upload(t1, 2, "Private until open")).status, 200);
+  eq("student cannot download an attachment in a locked part", (await api(s1, "GET", "/student/parts/2/attachment")).status, 403);
+  const stateWithAttachment = (await api(s1, "GET", "/student/state")).json;
+  eq("student sees the attachment name for an open part", stateWithAttachment.parts[0].attachment.name, "Class guide.pdf");
+  check("student cannot see locked attachment metadata", !stateWithAttachment.parts[1].attachment);
+  const attachment = await api(s1, "GET", "/student/parts/1/attachment");
+  eq("student downloads exact attachment contents", attachment.text, "Class guide");
+  check("file is forced to download", attachment.headers.get("content-disposition")?.startsWith("attachment;"));
+  eq("invalid replacement leaves original file in place", (await upload(t1, 1, "")).status, 400);
+  eq("original still downloads", (await api(s1, "GET", "/student/parts/1/attachment")).text, "Class guide");
+  eq("new upload replaces the single attachment", (await upload(t1, 1, "New version", "Revised guide.txt")).status, 200);
+  eq("student downloads replacement", (await api(s1, "GET", "/student/parts/1/attachment")).text, "New version");
+  eq("teacher removes file", (await api(t1, "DELETE", `${sessionBase}/parts/1/attachment`)).status, 200);
+  eq("removed file cannot be downloaded", (await api(s1, "GET", "/student/parts/1/attachment")).status, 404);
+  section("Session-specific entry tags");
+  const tagDraft = (await api(s1, "POST", "/student/entries", { part: 1, body: "Temporary tagged entry", tag: "Assumption" })).json.entry;
+  eq("other teacher cannot edit entry tags", (await api(t2, "PATCH", sessionBase, { entryTags: ["Claim"] })).status, 404);
+  eq("case-insensitive duplicate tags are rejected", (await api(t1, "PATCH", sessionBase, { entryTags: ["Claim", "claim"] })).status, 400);
+  eq("teacher configures custom tags", (await api(t1, "PATCH", sessionBase, { entryTags: ["Claim", "Fair test"] })).status, 200);
+  eq("student sees custom session tags", (await api(s1, "GET", "/student/state")).json.entryTags.join(","), "Claim,Fair test");
+  eq("removed tag rejected for new entries", (await api(s1, "POST", "/student/entries", { part: 1, body: "new", tag: "Assumption" })).status, 400);
+  const reSave = await api(s1, "PATCH", `/student/entries/${tagDraft.id}`, { body: "Temporary edited entry", tag: "Assumption" });
+  eq("existing entry stays editable and retains its old tag", reSave.json.entry?.tag, "Assumption");
+  eq("custom tag is valid", (await api(s1, "PATCH", `/student/entries/${tagDraft.id}`, { tag: "Fair test" })).json.entry?.tag, "Fair test");
+  await api(s1, "DELETE", `/student/entries/${tagDraft.id}`);
+  await api(t1, "PATCH", sessionBase, { entryTags: stateWithAttachment.entryTags });
   eq("PIN group without PIN -> 403", (await join(s4, "Dan Yu", "4", gC)).status, 403);
   eq("PIN group with wrong PIN -> 403", (await join(s4, "Dan Yu", "4", gC, "wrong")).status, 403);
   eq("PIN group with right PIN OK", (await join(s4, "Dan Yu", "4", gC, "abc12")).status, 200);
@@ -243,6 +279,16 @@ async function main() {
   await api(t1, "PATCH", `/teacher/sessions/${sid}`, { anonymiseSharing: true });
   cls = (await api(s3, "GET", "/student/class")).json;
   eq("anonymised label", cls.shares[0].label, "Sample Response #1");
+  const reactionPath = `/student/shares/${cls.shares[0].shareId}/reaction`;
+  eq("cannot react to an unpublished response", (await api(s3, "PUT", "/student/shares/999999/reaction", { reaction: "like" })).status, 404);
+  eq("cannot react to own response", (await api(s1, "PUT", reactionPath, { reaction: "heart" })).status, 403);
+  eq("student likes peer response", (await api(s3, "PUT", reactionPath, { reaction: "like" })).json.reactions?.like, 1);
+  eq("repeating the same request does not double count", (await api(s3, "PUT", reactionPath, { reaction: "like" })).json.reactions?.like, 1);
+  const swap = (await api(s3, "PUT", reactionPath, { reaction: "heart" })).json.reactions;
+  check("heart replaces a like instead of adding another reaction", swap.heart === 1 && swap.like === 0 && swap.mine === "heart");
+  const authorReactions = (await api(s1, "GET", "/student/class")).json.shares[0].reactions;
+  check("other students see only totals and their own selection", authorReactions.heart === 1 && authorReactions.mine === null && Object.keys(authorReactions).length === 3);
+  eq("student can undo a reaction", (await api(s3, "PUT", reactionPath, { reaction: null })).json.reactions?.heart, 0);
   check("group names AND student names absent when anonymised", !JSON.stringify(cls).includes("Group A") && !JSON.stringify(cls).includes("Alice"));
   const simg = await fetch(`${BASE}/api/images/${e1.id}`, { headers: { Cookie: `si_student=${s3.cookies.si_student}` } });
   eq("shared image visible to class", simg.status, 200);

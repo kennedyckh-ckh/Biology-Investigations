@@ -1,8 +1,18 @@
 import { all, get, num, type Row } from "./db";
 import { toDto } from "./entries";
+import type { PeerReaction } from "./constants";
 
 const BASE =
   "SELECT e.*, s.name AS s_name, s.class AS s_class, s.class_no AS s_class_no FROM entries e JOIN students s ON s.id=e.student_id WHERE e.id=?";
+
+export function reactionsFor(shareId: number, viewer?: number) {
+  const counts = { like: 0, heart: 0 };
+  for (const r of all("SELECT reaction, COUNT(*) AS n FROM share_reactions WHERE share_id=? GROUP BY reaction", shareId)) {
+    counts[r.reaction as PeerReaction] = num(r.n);
+  }
+  const mine = viewer === undefined ? undefined : get("SELECT reaction FROM share_reactions WHERE share_id=? AND student_id=?", shareId, viewer);
+  return { ...counts, mine: (mine?.reaction as PeerReaction | undefined) ?? null };
+}
 
 export function critiquePromptsOf(session: Row): { key: string; label: string; enabled: boolean }[] {
   try {
@@ -49,6 +59,8 @@ export function publishedShares(session: Row, viewerStudentId?: number) {
         hasImage: e.hasImage,
         table: e.table,
         critiques,
+        reactions: reactionsFor(num(sh.id), viewerStudentId),
+        canReact: viewerStudentId !== undefined && viewerStudentId !== e.studentId,
       };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);

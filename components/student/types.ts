@@ -1,4 +1,5 @@
 import type { TableData } from "@/components/ui";
+import type { InstructionFile } from "@/lib/constants";
 
 export interface Entry {
   id: number;
@@ -24,6 +25,7 @@ export interface PartInfo {
   locked: boolean;
   instructions?: string;
   webLink?: string;
+  attachment?: InstructionFile | null;
   questions?: { id: number; text: string }[];
   submission?: Submission;
   entryCount?: number;
@@ -33,6 +35,7 @@ export interface StateResp {
   session: { title: string; archived: boolean };
   group: { id: number; name: string; members: { id: number; name: string; class: string; classNo: string; me: boolean; online: boolean }[] };
   parts: PartInfo[];
+  entryTags: string[];
   serverTime: number;
 }
 export type SaveStatus = "idle" | "unsaved" | "saving" | "saved" | "error";
