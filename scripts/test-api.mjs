@@ -137,7 +137,8 @@ async function main() {
   const sessionBase = `/teacher/sessions/${sid}`;
   section("Ordered instruction blocks");
   const partEdit = { instructions: "CUSTOMISED by teacher", webLink: "https://example.org/p1", questions: ["Custom Q1", "Custom Q2"] };
-  const blocks = [{ title: "Predict", text: "Record a prediction." }, { title: "", text: "Explain your reasoning." }];
+  const blocks = [{ title: "Predict", text: "Record a prediction.", webLink: "https://example.org/predict" }, { title: "", text: "Explain your reasoning.", webLink: "https://example.org/explain" }];
+  const taskContent = (items) => items.map(({ title, text, webLink }) => ({ title, text, webLink }));
   eq("existing part starts with no task blocks", (await api(t1, "GET", sessionBase)).json.parts[0].instructionBlocks.length, 0);
   eq("another teacher cannot add blocks", (await api(t2, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: blocks })).status, 404);
   eq("teacher saves ordered task blocks", (await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: blocks })).status, 200);
@@ -146,11 +147,10 @@ async function main() {
   eq("an older client can save instructions without removing the blocks", (await api(t1, "PUT", `${sessionBase}/parts/1`, partEdit)).status, 200);
   eq("teacher can prepare blocks for a locked part", (await api(t1, "PUT", `${sessionBase}/parts/2`, { ...partEdit, instructionBlocks: blocks })).status, 200);
   const tasksState = (await api(s1, "GET", "/student/state")).json;
-  eq("students receive ordered blocks only for the open part", JSON.stringify(tasksState.parts[0].instructionBlocks), JSON.stringify(blocks));
+  eq("students receive ordered blocks with their own links", JSON.stringify(taskContent(tasksState.parts[0].instructionBlocks)), JSON.stringify(blocks));
   eq("students still receive the existing overview", tasksState.parts[0].instructions, partEdit.instructions);
   check("locked parts do not expose task blocks", !("instructionBlocks" in tasksState.parts[1]));
-  eq("teacher can clear the task blocks explicitly", (await api(t1, "PUT", `${sessionBase}/parts/2`, { ...partEdit, instructionBlocks: [] })).json.parts[1].instructionBlocks.length, 0);
-  const upload = async (who, part, text, name = "Class guide.pdf") => fetch(`${BASE}/api${sessionBase}/parts/${part}/attachment`, {
+  const upload = async (who, part, text, name = "Class guide.pdf", taskId) => fetch(`${BASE}/api${sessionBase}/parts/${part}${taskId ? `/tasks/${taskId}` : ""}/attachment`, {
     method: "PUT",
     headers: { Cookie: Object.entries(who.cookies).map(([k, v]) => `${k}=${v}`).join("; "), "Content-Type": "application/octet-stream", "X-Instruction-Filename": encodeURIComponent(name) },
     body: text,
@@ -173,6 +173,33 @@ async function main() {
   eq("new upload replaces the single attachment", (await upload(t1, 1, "New version", "Revised guide.txt")).status, 200);
   eq("student downloads replacement", (await api(s1, "GET", "/student/parts/1/attachment")).text, "New version");
   const pngBytes = Buffer.from(PNG.split(",")[1], "base64");
+  const savedTasks = tasksState.parts[0].instructionBlocks;
+  const taskIds = savedTasks.map(({ id }) => id);
+  const lockedId = (await api(t1, "GET", sessionBase)).json.parts[1].instructionBlocks[0].id;
+  const preview = `${sessionBase}/student-view`;
+  const taskPath = (part, id) => `/parts/${part}/tasks/${id}/attachment`;
+  eq("reject an invalid task URL", (await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: [{ ...savedTasks[0], webLink: "not a web address" }] })).status, 400);
+  eq("reject duplicate task IDs", (await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: [savedTasks[0], savedTasks[0]] })).status, 400);
+  eq("teacher uploads an image to the first task", (await upload(t1, 1, pngBytes, "First diagram.png", taskIds[0])).status, 200);
+  eq("teacher uploads a separate image to the second task", (await upload(t1, 1, pngBytes, "Second diagram.png", taskIds[1])).status, 200);
+  eq("teacher attaches an image to a locked task", (await upload(t1, 2, pngBytes, "Later diagram.png", lockedId)).status, 200);
+  eq("other teachers cannot upload to a task", (await upload(t2, 1, pngBytes, "Other diagram.png", taskIds[0])).status, 404);
+  eq("a task requires a real image signature", (await upload(t1, 1, "Plain text", "Not a diagram.png", taskIds[0])).status, 415);
+  eq("students cannot read a locked task diagram", (await api(s1, "GET", `/student${taskPath(2, lockedId)}`)).status, 403);
+  eq("the teacher preview also blocks locked task diagrams", (await api(t1, "GET", `${preview}${taskPath(2, lockedId)}`)).status, 403);
+  eq("anonymous visitors cannot use teacher preview", (await api(anon, "GET", preview)).status, 401);
+  eq("another teacher cannot use a session's student preview", (await api(t2, "GET", preview)).status, 404);
+  eq("teacher can read but not edit via preview endpoint", (await api(t1, "PUT", preview, {})).status, 405);
+  eq("owner preview streams open task diagrams", (await api(t1, "GET", `${preview}${taskPath(1, taskIds[0])}`)).headers.get("content-type"), "image/png");
+  const studentPreview = (await api(t1, "GET", preview)).json;
+  check("preview includes open task content and strips locked tasks and private group state", studentPreview.parts[0].instructionBlocks[0].attachment.name === "First diagram.png" && studentPreview.parts[1].locked && !studentPreview.parts[1].instructionBlocks && !studentPreview.group);
+  await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: savedTasks.slice().reverse() });
+  const reordered = (await api(s1, "GET", "/student/state")).json.parts[0].instructionBlocks;
+  check("task diagrams and links follow their block when reordered", reordered[0].id === taskIds[1] && reordered[0].attachment.name === "Second diagram.png"
+    && reordered[0].webLink === blocks[1].webLink && reordered[1].attachment.name === "First diagram.png" && reordered[1].webLink === blocks[0].webLink);
+  await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: savedTasks });
+  eq("teacher can clear the task blocks explicitly", (await api(t1, "PUT", `${sessionBase}/parts/2`, { ...partEdit, instructionBlocks: [] })).json.parts[1].instructionBlocks.length, 0);
+  eq("removed tasks no longer have a diagram", (await api(t1, "GET", `${sessionBase}${taskPath(2, lockedId)}`)).status, 404);
   eq("teacher uploads a diagram", (await upload(t1, 1, pngBytes, "Cell diagram.png")).status, 200);
   eq("teacher uploads a diagram before Part 2 opens", (await upload(t1, 2, pngBytes, "Hidden diagram.png")).status, 200);
   const diagramMeta = (await api(s1, "GET", "/student/state")).json.parts[0].attachment;
@@ -233,11 +260,13 @@ async function main() {
   eq("live monitor reports how many saved hints can be released", (await api(t1, "GET", `${sessionBase}/status`)).json.designHintCount, 1);
   state = (await api(s1, "GET", "/student/state")).json;
   check("saved design hints stay hidden until released", !("designTagHints" in state.parts[0]));
+  check("preview also hides unreleased hints", !(await api(t1, "GET", preview)).json.parts[0].designTagHints);
   const hintVisibility = `${sessionBase}/design-tag-hints/visibility`;
   eq("another teacher cannot release hints", (await api(t2, "PUT", hintVisibility, { visible: true })).status, 404);
   eq("owning teacher can release hints", (await api(t1, "PUT", hintVisibility, { visible: true })).status, 200);
   state = (await api(s1, "GET", "/student/state")).json;
   eq("students receive the hint for Part 1", state.parts[0].designTagHints[0].hint, designHint[0].hint);
+  eq("student preview respects hint release", (await api(t1, "GET", preview)).json.parts[0].designTagHints[0].hint, designHint[0].hint);
   check("design hints are not included outside Part 1", !state.parts[1].designTagHints);
   eq("teacher can hide hints again", (await api(t1, "PUT", hintVisibility, { visible: false })).status, 200);
   check("hidden hint content is not sent to students", !JSON.stringify((await api(s1, "GET", "/student/state")).json).includes(designHint[0].hint));
@@ -248,6 +277,7 @@ async function main() {
   eq("Part 2 reference -> 403 while locked", (await api(s1, "GET", "/student/reference?part=2")).status, 403);
   await api(t1, "POST", `/teacher/sessions/${sid}/parts/3/visibility`, { visibility: "hidden" });
   state = (await api(s1, "GET", "/student/state")).json;
+  check("hidden parts are omitted from student preview", !(await api(t1, "GET", preview)).json.parts.some((p) => p.part === 3));
   eq("hidden Part 3 is absent from student state", state.parts.length, 2);
   eq("hidden Part 3 entries -> 403", (await api(s1, "GET", "/student/entries?part=3")).status, 403);
   await api(t1, "POST", `/teacher/sessions/${sid}/parts/3/visibility`, { visibility: "visible" });
@@ -418,6 +448,8 @@ async function main() {
   section("Projector view shows only published content");
   const unshared = (await api(s1, "POST", "/student/entries", { part: 2, body: "PRIVATE-DRAFT-TEXT" })).json.entry;
   const proj = (await api(t1, "GET", `/teacher/sessions/${sid}/projector`)).json;
+  const previewBoard = (await api(t1, "GET", `${preview}/class`)).json;
+  check("student preview board includes only published responses with anonymous labels", previewBoard.shares.length === proj.shares.length && !JSON.stringify(previewBoard).includes("PRIVATE-DRAFT-TEXT") && !JSON.stringify(previewBoard).includes("Alice") && previewBoard.shares.every((s) => !s.canReact));
   check("projector has shared entries", proj.shares.length === 2);
   check("projector excludes unshared drafts and names", !JSON.stringify(proj).includes("PRIVATE-DRAFT-TEXT") && !JSON.stringify(proj).includes("Alice") && !JSON.stringify(proj).includes("Group A"));
   eq("student cannot open projector endpoint", (await api(s1, "GET", `/teacher/sessions/${sid}/projector`)).status, 401);
@@ -430,7 +462,7 @@ async function main() {
   check("CSV has student name/class/class no/tag/stage", /Alice Lee/.test(csv.text) && /"8A"/.test(csv.text) && /Hypothesis/.test(csv.text) && /Part 1: Designing/.test(csv.text));
   check("CSV neutralises spreadsheet formulas", csv.text.includes("\"'=HYPERLINK"));
   const js = (await api(t1, "GET", `/teacher/sessions/${sid}/export?format=json`)).json;
-  eq("JSON export includes the ordered task blocks", JSON.stringify(js.stages[0].instructionBlocks), JSON.stringify(blocks));
+  eq("JSON export includes the ordered task blocks and links", JSON.stringify(taskContent(js.stages[0].instructionBlocks)), JSON.stringify(blocks));
   check("JSON export has stages, questions and entries", js.stages.length === 3 && js.stages[0].guidingQuestions[0] === "Custom Q1" && js.entries.length >= 4);
   eq("other teacher cannot export", (await api(t2, "GET", `/teacher/sessions/${sid}/export?format=json`)).status, 404);
   eq("educator cannot export", (await api(ed, "GET", `/teacher/sessions/${sid}/export?format=json`)).status, 403);

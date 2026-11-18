@@ -4,7 +4,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { pipeline } from "node:stream/promises";
-import { UPLOAD_DIR, get, num, type Row } from "./db";
+import { UPLOAD_DIR, all, get, num, type Row } from "./db";
 import { LIMITS, type InstructionFile } from "./constants";
 import { bad, HttpError, notFound } from "./router";
 
@@ -34,15 +34,25 @@ function previewMime(storageName: string) {
   return mime;
 }
 
-export function attachmentRow(sid: number, part: number) {
-  return get("SELECT * FROM instruction_attachments WHERE session_id=? AND part=?", sid, part);
+export function attachmentRow(sid: number, part: number, taskId?: string) {
+  return taskId === undefined
+    ? get("SELECT * FROM instruction_attachments WHERE session_id=? AND part=?", sid, part)
+    : get("SELECT * FROM task_instruction_attachments WHERE session_id=? AND part=? AND task_id=?", sid, part, taskId);
 }
 
-export function attachmentInfo(sid: number, part: number, teacher = false): InstructionFile | null {
-  const row = attachmentRow(sid, part);
-  const prefix = teacher ? `/api/teacher/sessions/${sid}` : "/api/student";
+export function attachmentInfo(sid: number, part: number, prefix = "/api/student", taskId?: string): InstructionFile | null {
+  const row = attachmentRow(sid, part, taskId);
   if (!row) return null;
-  const url = `${prefix}/parts/${part}/attachment`;
+  return fileInfo(row, part, prefix, taskId);
+}
+
+export function taskAttachmentInfo(sid: number, part: number, prefix: string) {
+  return new Map(all("SELECT * FROM task_instruction_attachments WHERE session_id=? AND part=?", sid, part)
+    .map((row) => [String(row.task_id), fileInfo(row, part, prefix, String(row.task_id))]));
+}
+
+function fileInfo(row: Row, part: number, prefix: string, taskId?: string): InstructionFile {
+  const url = `${prefix}/parts/${part}${taskId ? `/tasks/${encodeURIComponent(taskId)}` : ""}/attachment`;
   const storageName = String(row.storage_name);
   return {
     name: String(row.name), size: num(row.size), url,
@@ -59,7 +69,7 @@ export function removeInstructionFile(storageName: string) {
   }
 }
 
-export async function receiveInstructionFile(req: Request) {
+export async function receiveInstructionFile(req: Request, imageOnly = false) {
   const declaredSize = Number(req.headers.get("content-length"));
   if (declaredSize > LIMITS.instructionFileBytes) throw tooLarge();
   let name: string;
@@ -84,6 +94,7 @@ export async function receiveInstructionFile(req: Request) {
       }
     }, createWriteStream(path.join(DIR, storageName), { flags: "wx" }));
     if (!size || (declaredSize > 0 && size !== declaredSize)) throw bad("The file is empty or the upload was incomplete.");
+    if (imageOnly && !previewMime(storageName)) throw new HttpError(415, "not_previewable", "Choose a PNG, JPEG, WebP or GIF diagram.");
     return { storageName, name, size };
   } catch (error) {
     removeInstructionFile(storageName);

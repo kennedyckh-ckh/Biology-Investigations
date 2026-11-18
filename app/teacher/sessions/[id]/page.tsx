@@ -70,6 +70,7 @@ function Inner({ id }: { id: string }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <a className="btn-primary" href={`/teacher/sessions/${s.id}/student-view`} target="_blank" rel="noopener noreferrer">Student view</a>
           <a className="btn-accent" href={`/teacher/sessions/${s.id}/projector`} target="_blank" rel="noopener noreferrer">
             📽 Projector view
           </a>

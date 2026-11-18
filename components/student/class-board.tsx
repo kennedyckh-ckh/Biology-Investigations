@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { api, usePoll, ApiError } from "@/lib/client/api";
-import { EntryBody, TagBadge, Spinner, ErrorBox, Empty, useToast, type TableData } from "@/components/ui";
+import { EnlargeView, EntryBody, TagBadge, Spinner, ErrorBox, Empty, useToast, type TableData } from "@/components/ui";
 import { AiView, type AiContent } from "@/components/ai-view";
 import type { PeerReaction } from "@/lib/constants";
 
@@ -34,8 +34,8 @@ interface ClassResp {
   prompts: { key: string; label: string }[];
 }
 
-export function ClassBoard() {
-  const { data, error, loading, refresh, setData } = usePoll<ClassResp>("/student/class", 5000);
+export function ClassBoard({ previewEndpoint }: { previewEndpoint?: string } = {}) {
+  const { data, error, loading, refresh, setData } = usePoll<ClassResp>(previewEndpoint ?? "/student/class", 5000);
   if (loading && !data) return <Spinner />;
   if (error && !data) return <ErrorBox message={error.message} onRetry={refresh} />;
   if (!data) return null;
@@ -81,7 +81,7 @@ export function ClassBoard() {
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
             {data.shares.map((s) => (
-              <ShareCard key={s.shareId} s={s} prompts={data.prompts} onChanged={refresh} onReaction={(reactions) => {
+              <ShareCard key={s.shareId} s={s} prompts={data.prompts} readOnly={!!previewEndpoint} onChanged={refresh} onReaction={(reactions) => {
                 setData((current) => current && { ...current, shares: current.shares.map((item) => item.shareId === s.shareId ? { ...item, reactions } : item) });
               }} />
             ))}
@@ -92,8 +92,9 @@ export function ClassBoard() {
   );
 }
 
-function ShareCard({ s, prompts, onChanged, onReaction }: {
+function ShareCard({ s, prompts, readOnly, onChanged, onReaction }: {
   s: ClassResp["shares"][number]; prompts: ClassResp["prompts"]; onChanged: () => void;
+  readOnly: boolean;
   onReaction: (r: ClassResp["shares"][number]["reactions"]) => void;
 }) {
   const toast = useToast();
@@ -138,7 +139,10 @@ function ShareCard({ s, prompts, onChanged, onReaction }: {
         </div>
       </div>
       <EntryBody body={s.body} hasImage={s.hasImage} entryId={s.entryId} table={s.table} />
-      {s.canReact ? (
+      <EnlargeView title={`${s.label} · Part ${s.part}`} label="Enlarge response">
+        <EntryBody body={s.body} hasImage={s.hasImage} entryId={s.entryId} table={s.table} enlarged />
+      </EnlargeView>
+      {!readOnly && s.canReact ? (
         <div className="flex flex-wrap gap-2" role="group" aria-label="Reactions">
           {(["like", "heart"] as const).map((reaction) => (
             <button key={reaction} type="button" className={`btn-ghost min-h-11 ${s.reactions.mine === reaction ? (reaction === "like" ? "bg-amber-50 text-amber-800" : "bg-rose-50 text-rose-700") : ""}`}
@@ -163,7 +167,7 @@ function ShareCard({ s, prompts, onChanged, onReaction }: {
                     <b className="text-violet-700">{c.promptLabel}</b> · {c.authorLabel}
                     {c.mine && " (you)"}
                   </span>
-                  {c.mine && (
+                  {!readOnly && c.mine && (
                     <button className="text-rose-600 hover:underline" onClick={async () => { await api("DELETE", `/student/critiques/${c.id}`).catch(() => {}); onChanged(); }}>
                       Delete
                     </button>
@@ -174,7 +178,7 @@ function ShareCard({ s, prompts, onChanged, onReaction }: {
             ))}
           </ul>
         )}
-        {prompts.length > 0 ? (
+        {readOnly ? null : prompts.length > 0 ? (
           <div className="space-y-2">
             <select className="input" value={key} onChange={(e) => setSelectedKey(e.target.value)} aria-label="Type of critique">
               {prompts.map((p) => (

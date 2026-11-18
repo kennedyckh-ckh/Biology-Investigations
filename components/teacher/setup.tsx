@@ -151,8 +151,8 @@ function SessionSettings({ session, onSaved, disabled }: { session: SessionDetai
   );
 }
 
-function InstructionAttachment({ sessionId, part, initial, onSaved, disabled }: {
-  sessionId: number; part: number; initial: InstructionFile | null; onSaved: () => void; disabled: boolean;
+function InstructionAttachment({ sessionId, part, initial, onSaved, disabled, taskId, taskNumber }: {
+  sessionId: number; part: number; initial: InstructionFile | null; onSaved: () => void; disabled: boolean; taskId?: string; taskNumber?: number;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -160,7 +160,8 @@ function InstructionAttachment({ sessionId, part, initial, onSaved, disabled }: 
   const [error, setError] = useState("");
   const [inputVersion, setInputVersion] = useState(0);
   const toast = useToast();
-  const endpoint = `/teacher/sessions/${sessionId}/parts/${part}/attachment`;
+  const endpoint = `/teacher/sessions/${sessionId}/parts/${part}${taskId ? `/tasks/${taskId}` : ""}/attachment`;
+  const resource = taskId ? "diagram" : "file";
   const busy = progress !== null || removing;
 
   function upload() {
@@ -176,7 +177,7 @@ function InstructionAttachment({ sessionId, part, initial, onSaved, disabled }: 
       if (request.status >= 200 && request.status < 300) {
         setFile(null);
         setInputVersion((n) => n + 1);
-        toast("Instruction file uploaded");
+        toast(taskId ? "Task diagram uploaded" : "Instruction file uploaded");
         onSaved();
       } else {
         let message = `Upload failed (${request.status}).`;
@@ -194,7 +195,7 @@ function InstructionAttachment({ sessionId, part, initial, onSaved, disabled }: 
     setError("");
     try {
       await api("DELETE", endpoint);
-      toast("Instruction file removed");
+      toast(taskId ? "Task diagram removed" : "Instruction file removed");
       onSaved();
     } catch (e) {
       setError((e as ApiError).message);
@@ -205,20 +206,20 @@ function InstructionAttachment({ sessionId, part, initial, onSaved, disabled }: 
 
   return (
     <fieldset className="space-y-2">
-      <legend className="label">Instruction file</legend>
-      <p className="text-xs text-slate-600">One shared file per part, up to 500 MB. PNG, JPEG, WebP and GIF images display directly on the student page when the part opens. Other files are available to download.</p>
-      {initial && <p className="text-sm"><a className="break-all text-blue-700 underline" href={initial.url} download>{initial.name}</a> <span className="text-slate-500">({(initial.size / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MB)</span></p>}
+      <legend className="label">{taskId ? "Task diagram (optional)" : "Shared part file"}</legend>
+      <p className="text-xs text-slate-600">{taskId ? "PNG, JPEG, WebP or GIF, up to 500 MB. Students see a compact diagram inside this task." : "This file applies to the whole part. Use Task diagram for images that belong to a specific task."}</p>
+      {initial && <p className="text-sm"><a className="break-all text-blue-700 underline" href={initial.previewUrl ?? initial.url} download={!initial.previewUrl} target={initial.previewUrl ? "_blank" : undefined} rel="noopener noreferrer">{initial.name}</a> <span className="text-slate-500">({(initial.size / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MB)</span></p>}
       {!disabled && (
         <div className="flex flex-wrap items-center gap-2">
-          <input key={inputVersion} type="file" aria-label={`Choose instruction file for Part ${part}`} className="input min-w-0 max-w-sm" disabled={busy} onChange={(e) => {
+          <input key={inputVersion} type="file" aria-label={taskId ? `Choose diagram for Task ${taskNumber}` : `Choose instruction file for Part ${part}`} accept={taskId ? "image/png,image/jpeg,image/webp,image/gif" : undefined} className="input min-w-0 max-w-sm" disabled={busy} onChange={(e) => {
             const selected = e.target.files?.[0] ?? null;
             const invalid = selected && (selected.size > LIMITS.instructionFileBytes || selected.size === 0);
             setFile(invalid ? null : selected);
             setError(invalid ? "Choose a non-empty file no larger than 500 MB." : "");
             if (invalid) e.target.value = "";
           }} />
-          <button type="button" className="btn-ghost btn-sm" disabled={!file || busy} onClick={upload}>{initial ? "Replace file" : "Upload file"}</button>
-          {initial && <button type="button" className="btn-ghost btn-sm text-rose-700" disabled={busy} onClick={remove}>Remove file</button>}
+          <button type="button" className="btn-ghost btn-sm" disabled={!file || busy} onClick={upload}>{initial ? `Replace ${resource}` : `Upload ${resource}`}</button>
+          {initial && <button type="button" className="btn-ghost btn-sm text-rose-700" disabled={busy} onClick={remove}>Remove {resource}</button>}
         </div>
       )}
       {progress !== null && <div role="status" className="text-sm">Uploading: {progress}%<progress aria-label="Upload progress" className="ml-2 align-middle" value={progress} max={100} /></div>}
@@ -250,7 +251,7 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
   async function save() {
     setBusy(true);
     try {
-      await api("PUT", `/teacher/sessions/${sessionId}/parts/${cfg.part}`, { instructions, instructionBlocks: blocks, webLink: link, questions: qs.filter((q) => q.trim()) });
+      await api("PUT", `/teacher/sessions/${sessionId}/parts/${cfg.part}`, { instructions, instructionBlocks: blocks.map(({ id, title, text, webLink }) => ({ id, title, text, webLink })), webLink: link, questions: qs.filter((q) => q.trim()) });
       setDirty(false);
       toast(`Part ${cfg.part} saved`);
       onSaved();
@@ -281,7 +282,7 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
         <p className="text-xs text-slate-600">Add separate tasks and arrange them in the order students should follow.</p>
         <ol className="space-y-3">
           {blocks.map((block, i) => (
-            <li key={i} className="space-y-3 rounded-lg border border-blue-100 bg-white p-3">
+            <li key={block.id} className="space-y-3 rounded-lg border border-blue-100 bg-white p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="badge bg-blue-100 text-blue-900">Task {i + 1}</span>
                 <div className="flex flex-wrap gap-1">
@@ -301,16 +302,27 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
               <Field label="Task instructions">
                 <textarea className="input min-h-24" aria-label={`Task ${i + 1} instructions`} value={block.text} disabled={disabled || busy} maxLength={LIMITS.instructionTextMax} onChange={(e) => touch(setBlocks)(blocks.map((b, j) => j === i ? { ...b, text: e.target.value } : b))} />
               </Field>
+              <Field label="Task external link (optional)">
+                <input className="input" aria-label={`Task ${i + 1} external link`} value={block.webLink} disabled={disabled || busy} placeholder="https://…" maxLength={500} onChange={(e) => touch(setBlocks)(blocks.map((b) => b.id === block.id ? { ...b, webLink: e.target.value } : b))} />
+              </Field>
+              {cfg.instructionBlocks.some((b) => b.id === block.id)
+                ? <InstructionAttachment sessionId={sessionId} part={cfg.part} taskId={block.id} taskNumber={i + 1} initial={cfg.instructionBlocks.find((b) => b.id === block.id)?.attachment ?? null} onSaved={onSaved} disabled={disabled} />
+                : <p className="text-xs text-slate-600">Save this part before uploading a diagram for this task.</p>}
             </li>
           ))}
         </ol>
-        <button type="button" className="btn-ghost btn-sm" disabled={disabled || busy || blocks.length >= LIMITS.instructionBlockCount} onClick={() => touch(setBlocks)([...blocks, { title: "", text: "" }])}>+ Add task block</button>
+        <button type="button" className="btn-ghost btn-sm" disabled={disabled || busy || blocks.length >= LIMITS.instructionBlockCount} onClick={() => touch(setBlocks)([...blocks, { id: crypto.randomUUID(), title: "", text: "", webLink: "" }])}>+ Add task block</button>
         {blocks.some((b) => !b.text.trim()) && <p className="text-xs text-slate-600">Fill in the instructions for every task or remove blank tasks before saving.</p>}
       </div>
-      <Field label="External web link" hint="Opens in a new tab for students. Must start with http:// or https://">
-        <input className="input" value={link} onChange={(e) => touch(setLink)(e.target.value)} disabled={disabled} placeholder="https://…" maxLength={500} />
-      </Field>
-      <InstructionAttachment sessionId={sessionId} part={cfg.part} initial={cfg.attachment} onSaved={onSaved} disabled={disabled} />
+      <details className="rounded-lg border border-slate-200 p-3">
+        <summary className="cursor-pointer text-sm font-semibold">Shared part resources (optional)</summary>
+        <div className="mt-3 space-y-3">
+          {(cfg.webLink || link) && <Field label="Shared part web link" hint="Clear this link if you’ve moved it into a task.">
+            <input className="input" value={link} onChange={(e) => touch(setLink)(e.target.value)} disabled={disabled} maxLength={500} />
+          </Field>}
+          <InstructionAttachment sessionId={sessionId} part={cfg.part} initial={cfg.attachment} onSaved={onSaved} disabled={disabled} />
+        </div>
+      </details>
       <div>
         <span className="label">Guiding questions</span>
         <ol className="space-y-2">

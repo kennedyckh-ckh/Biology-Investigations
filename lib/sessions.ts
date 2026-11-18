@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { all, get, run, tx, now, num, type Row } from "./db";
-import { DEFAULT_CRITIQUE_PROMPTS, TAGS, type DesignTagHint, type InstructionBlock } from "./constants";
-import { attachmentInfo } from "./instruction-files";
+import { DEFAULT_CRITIQUE_PROMPTS, PART_TITLES, TAGS, type DesignTagHint, type InstructionBlock } from "./constants";
+import { attachmentInfo, taskAttachmentInfo } from "./instruction-files";
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export function newJoinCode(): string {
@@ -57,24 +57,49 @@ export function questionsFor(sessionId: number, part: number): { id: number; tex
   return all("SELECT id,text FROM session_questions WHERE session_id=? AND part=? ORDER BY position,id", sessionId, part).map((q) => ({ id: num(q.id), text: String(q.text) }));
 }
 
-export function instructionBlocksFor(sessionId: number, part: number): InstructionBlock[] {
+export function instructionBlocksFor(sessionId: number, part: number, prefix?: string): InstructionBlock[] {
   const saved = get("SELECT blocks_json FROM part_instruction_blocks WHERE session_id=? AND part=?", sessionId, part);
-  return saved ? JSON.parse(String(saved.blocks_json)) as InstructionBlock[] : [];
+  if (!saved) return [];
+  const blocks = JSON.parse(String(saved.blocks_json)) as InstructionBlock[];
+  const files = prefix && blocks.length ? taskAttachmentInfo(sessionId, part, prefix) : null;
+  return blocks.map(({ id, title, text, webLink }, i) => {
+    const taskId = id ?? `legacy-${i + 1}`;
+    return { id: taskId, title, text, webLink: webLink ?? "", ...(prefix ? { attachment: files?.get(taskId) ?? null } : {}) };
+  });
 }
 
 export function partConfig(sessionId: number) {
+  const prefix = `/api/teacher/sessions/${sessionId}`;
   return [1, 2, 3].map((part) => {
     const p = get("SELECT * FROM session_parts WHERE session_id=? AND part=?", sessionId, part)!;
     return {
       part,
       instructions: String(p.instructions),
-      instructionBlocks: instructionBlocksFor(sessionId, part),
+      instructionBlocks: instructionBlocksFor(sessionId, part, prefix),
       webLink: String(p.web_link),
-      attachment: attachmentInfo(sessionId, part, true),
+      attachment: attachmentInfo(sessionId, part, prefix),
       visibility: String(p.visibility),
       questions: questionsFor(sessionId, part),
     };
   });
+}
+
+/** Use the same release and visibility rules for students and the read-only teacher preview. */
+export function studentPart(sessionId: number, part: number, entryTags: readonly string[], prefix = "/api/student") {
+  const p = get("SELECT * FROM session_parts WHERE session_id=? AND part=?", sessionId, part)!;
+  const vis = String(p.visibility);
+  if (vis === "hidden") return null;
+  const base = { part, title: PART_TITLES[part], locked: vis !== "open" };
+  if (base.locked) return base;
+  return {
+    ...base,
+    instructions: String(p.instructions),
+    instructionBlocks: instructionBlocksFor(sessionId, part, prefix),
+    webLink: String(p.web_link),
+    attachment: attachmentInfo(sessionId, part, prefix),
+    questions: questionsFor(sessionId, part),
+    ...(part === 1 && designHintsVisible(sessionId) ? { designTagHints: designHintsFor(sessionId).filter(({ tag }) => entryTags.includes(tag)) } : {}),
+  };
 }
 
 export function entryTagsFor(sessionId: number): readonly string[] {
