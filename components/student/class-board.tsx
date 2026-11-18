@@ -4,6 +4,7 @@ import { api, usePoll, ApiError } from "@/lib/client/api";
 import { EnlargeView, EntryBody, TagBadge, Spinner, ErrorBox, Empty, useToast, type TableData } from "@/components/ui";
 import { AiView, type AiContent } from "@/components/ai-view";
 import { ReactionIcon } from "@/components/reaction-icon";
+import { partIcon, WorkspaceHeading, WorkspaceIcon } from "@/components/workspace-icon";
 import type { PeerReaction } from "@/lib/constants";
 
 interface ClassResp {
@@ -23,6 +24,7 @@ interface ClassResp {
   }[];
   ai: { id: number; kind: string; part: number; content: AiContent }[];
   prompts: { key: string; label: string }[];
+  promptsByPart: Record<number, { key: string; label: string }[]>;
 }
 
 export function ClassBoard({ previewEndpoint }: { previewEndpoint?: string } = {}) {
@@ -41,8 +43,8 @@ export function ClassBoard({ previewEndpoint }: { previewEndpoint?: string } = {
 
       {discussion.length > 0 && (
         <section>
-          <h3 className="mb-3 text-lg font-bold text-violet-900">💬 Questions for class discussion</h3>
-          <div className="space-y-4">
+          <WorkspaceHeading icon="reflect">Questions for class discussion</WorkspaceHeading>
+          <div className="mt-3 space-y-4">
             {discussion.map((d) => (
               <div key={d.id} className="card border-violet-200 bg-violet-50/50">
                 <AiView content={d.content} />
@@ -54,8 +56,8 @@ export function ClassBoard({ previewEndpoint }: { previewEndpoint?: string } = {
 
       {summaries.length > 0 && (
         <section>
-          <h3 className="mb-3 text-lg font-bold">Summaries from your teacher</h3>
-          <div className="space-y-4">
+          <WorkspaceHeading icon="task">Summaries from your teacher</WorkspaceHeading>
+          <div className="mt-3 space-y-4">
             {summaries.map((d) => (
               <div key={d.id} className="card">
                 <AiView content={d.content} />
@@ -65,14 +67,14 @@ export function ClassBoard({ previewEndpoint }: { previewEndpoint?: string } = {
         </section>
       )}
 
-      <section>
-        <h3 className="mb-3 text-lg font-bold">Shared responses</h3>
+      <section className="space-y-3">
+        <WorkspaceHeading icon="board">Shared responses</WorkspaceHeading>
         {data.shares.length === 0 ? (
           <Empty>Nothing has been shared yet. Your teacher will share responses here.</Empty>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
             {data.shares.map((s) => (
-              <ShareCard key={s.shareId} s={s} prompts={data.prompts} readOnly={!!previewEndpoint} onChanged={refresh} onReaction={(reactions) => {
+              <ShareCard key={s.shareId} s={s} prompts={data.promptsByPart?.[s.part] ?? data.prompts} readOnly={!!previewEndpoint} onChanged={refresh} onReaction={(reactions) => {
                 setData((current) => current && { ...current, shares: current.shares.map((item) => item.shareId === s.shareId ? { ...item, reactions } : item) });
               }} />
             ))}
@@ -125,7 +127,7 @@ function ShareCard({ s, prompts, readOnly, onChanged, onReaction }: {
       <div className="flex items-center justify-between gap-2">
         <h4 className="font-bold text-slate-900">{s.label}</h4>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500">Part {s.part}</span>
+          <span className="badge gap-1.5 bg-blue-50 text-blue-900"><WorkspaceIcon name={partIcon(s.part)} className="h-3.5 w-3.5" />Part {s.part}</span>
           <TagBadge tag={s.tag} />
         </div>
       </div>
@@ -184,7 +186,7 @@ function ShareCard({ s, prompts, readOnly, onChanged, onReaction }: {
             </button>
           </div>
         ) : (
-          <p className="text-xs text-slate-500">Your teacher has not turned on critique prompts.</p>
+          <p className="text-xs text-slate-500">Your teacher has not turned on critique prompts for this stage.</p>
         )}
       </div>
     </article>

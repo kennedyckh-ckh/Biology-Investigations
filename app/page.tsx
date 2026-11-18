@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/client/api";
 import { Field } from "@/components/ui";
 import { BrandLogo } from "@/components/brand-logo";
+import { partIcon, WorkspaceIcon } from "@/components/workspace-icon";
 
 interface Me {
   staff: { id: number; role: "teacher" | "educator"; name: string } | null;
@@ -56,18 +57,23 @@ export default function Home() {
           <p className="hidden border-l border-blue-600 pl-5 text-xs font-semibold tracking-wide text-blue-100 sm:block">Collaborative science inquiry platform</p>
         </div>
       </header>
-      <main className="mx-auto grid max-w-6xl items-start gap-7 px-5 pt-8 pb-12 sm:px-8 sm:pt-12 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.9fr)] lg:gap-x-20 lg:gap-y-7 lg:pt-18">
-          <div className="lg:col-start-1 lg:row-start-1">
-            <p className="flex items-center gap-2.5 text-xs font-semibold tracking-[0.15em] text-blue-700 uppercase">
-              <span className="h-px w-6 bg-blue-600" aria-hidden="true" /> Classroom workspace
+      <main className="mx-auto grid max-w-6xl items-start gap-5 px-4 pt-5 pb-12 sm:gap-6 sm:px-8 sm:pt-9 lg:grid-cols-[minmax(0,1.19fr)_minmax(0,0.92fr)] lg:gap-x-8 lg:pt-12">
+          <div className="inquiry-cover relative isolate overflow-hidden rounded-2xl px-5 pt-5 pb-6 text-white sm:px-8 sm:py-8 lg:col-start-1 lg:row-start-1 lg:px-9 lg:py-10">
+            <svg viewBox="0 0 300 235" aria-hidden="true" className="pointer-events-none absolute -right-4 -bottom-5 -z-10 h-auto w-48 text-blue-300/25 sm:w-72" fill="none" stroke="currentColor" strokeWidth="1.15">
+              <circle cx="200" cy="141" r="90" /><circle cx="200" cy="141" r="66" /><circle cx="200" cy="141" r="38" />
+              <path d="M89 141h207m-96-112v201M64 214l54-45 38 12 38-62 47 14 29-51" />
+              <circle cx="118" cy="169" r="4" fill="currentColor" /><circle cx="156" cy="181" r="4" fill="currentColor" /><circle cx="194" cy="119" r="4" fill="currentColor" /><circle cx="241" cy="133" r="4" fill="currentColor" /><circle cx="270" cy="82" r="4" fill="currentColor" />
+            </svg>
+            <p className="flex items-center gap-2 text-xs font-semibold tracking-[0.14em] text-blue-100 uppercase">
+              <WorkspaceIcon name="enact" /> Biology inquiry workspace
             </p>
-            <h1 className="mt-3 text-[2.1rem] leading-[1.12] font-bold tracking-tight text-blue-950 sm:text-5xl">Scientific Investigations</h1>
-            <p className="mt-3 max-w-md text-sm leading-relaxed text-slate-600 sm:mt-4 sm:text-base">
-              Plan an investigation, collect evidence, and discuss what your findings support. Work together at each stage.
+            <h1 className="mt-2 max-w-[12ch] text-[2rem] leading-[1.09] font-bold tracking-tight text-white sm:mt-4 sm:text-[3.1rem]">Scientific Investigations</h1>
+            <p className="mt-2 max-w-[35ch] text-sm leading-relaxed text-blue-100 sm:mt-4 sm:text-base">
+              Plan an investigation, collect evidence, and use it to explain what you found.
             </p>
           </div>
-          <section aria-label="Platform access" className="w-full overflow-hidden rounded-xl border border-blue-200 bg-white px-5 pt-5 pb-6 shadow-sm shadow-blue-950/10 sm:px-7 sm:pt-6 sm:pb-7 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-              <p className="mb-3 text-xs font-semibold tracking-[0.15em] text-slate-600 uppercase">Platform access</p>
+          <section aria-label="Platform access" className="w-full overflow-hidden rounded-2xl border border-blue-200 bg-white px-5 pt-5 pb-6 shadow-sm shadow-blue-950/10 sm:px-7 sm:pt-6 sm:pb-7 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+              <p className="mb-3 flex items-center gap-2 text-xs font-semibold tracking-[0.13em] text-blue-800 uppercase"><WorkspaceIcon name="lock" /> Platform access</p>
               <div
                 className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 text-sm font-semibold"
                 role="tablist" aria-label="Choose your role"
@@ -136,15 +142,15 @@ export default function Home() {
                 {me?.staff && <ContinueCard label={`Continue as ${me.staff.name}`} sub={me.staff.role === "teacher" ? "Teacher dashboard" : "Teacher Educator dashboard"} badge="Signed in" href={me.staff.role === "teacher" ? "/teacher" : "/educator"} />}
               </div>
             )}
-            <section aria-labelledby="inquiry-stages" className="border-t border-slate-300 pt-4">
-              <h2 id="inquiry-stages" className="text-xs font-semibold tracking-[0.13em] text-slate-600 uppercase">The investigation cycle</h2>
-              <ol className="mt-2 divide-y divide-slate-200">
+            <section aria-labelledby="inquiry-stages" className="rounded-2xl border border-blue-100 bg-white p-4 sm:p-5">
+              <h2 id="inquiry-stages" className="text-sm font-semibold tracking-wide text-blue-950">The investigation cycle</h2>
+              <ol className="mt-3 space-y-2">
                 {INQUIRY_STAGES.map((stage, i) => (
-                  <li key={stage.title} className="flex items-start gap-3 py-3">
-                    <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-blue-100 text-xs font-semibold tabular-nums text-blue-800">{`0${i + 1}`}</span>
+                  <li key={stage.title} className="flex items-center gap-3 rounded-lg border border-blue-100 bg-blue-50/65 p-2.5">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-white text-blue-700"><WorkspaceIcon name={partIcon(i + 1)} className="h-5 w-5" /></span>
                     <div>
-                      <p className="text-sm font-semibold text-slate-900">{stage.title}</p>
-                      <p className="mt-0.5 text-sm leading-snug text-slate-600">{stage.desc}</p>
+                      <p className="text-sm font-semibold text-blue-950">{stage.title}</p>
+                      <p className="mt-0.5 text-xs leading-snug text-slate-600 sm:text-sm">{stage.desc}</p>
                     </div>
                   </li>
                 ))}

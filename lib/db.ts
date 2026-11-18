@@ -109,6 +109,14 @@ CREATE TABLE IF NOT EXISTS session_entry_tags(
   session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
   tags_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS stage_settings(
+  session_id INTEGER NOT NULL,
+  part INTEGER NOT NULL,
+  tags_json TEXT,
+  prompts_json TEXT,
+  PRIMARY KEY(session_id, part),
+  FOREIGN KEY(session_id, part) REFERENCES session_parts(session_id, part) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS design_tag_hints(
   session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
   hints_json TEXT NOT NULL

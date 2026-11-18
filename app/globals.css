@@ -75,6 +75,13 @@ body {
   outline-offset: 2px;
 }
 
+.inquiry-cover {
+  background-color: var(--color-blue-950);
+  background-image:
+    radial-gradient(ellipse at 92% 80%, rgba(62, 118, 181, .25), transparent 64%),
+    linear-gradient(125deg, #102542 30%, #173b63 100%);
+}
+
 @utility btn {
   @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50;
 }

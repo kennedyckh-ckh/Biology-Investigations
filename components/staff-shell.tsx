@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/client/api";
 import { Header, Spinner } from "@/components/ui";
+import { WorkspaceIcon } from "@/components/workspace-icon";
 
 export interface StaffUser {
   id: number;
@@ -35,9 +36,9 @@ export function StaffShell({ role, children, crumbs }: { role: "teacher" | "educ
           <>
             {crumbs}
             <Link href={role === "teacher" ? "/teacher" : "/educator"} className="btn-ghost btn-sm">
-              Dashboard
+              <WorkspaceIcon name="board" />Dashboard
             </Link>
-            <Link href={`/${role}/api-usage`} className="btn-ghost btn-sm">API usage</Link>
+            <Link href={`/${role}/api-usage`} className="btn-ghost btn-sm"><WorkspaceIcon name="analysis" />API usage</Link>
             <button className="btn-ghost btn-sm" onClick={async () => { await api("POST", "/auth/logout").catch(() => {}); router.push("/"); }}>
               Sign out
             </button>

@@ -59,7 +59,7 @@ export default function StudentPage() {
             {/* All unlocked parts stay mounted so nothing typed is lost when switching tabs. */}
             {data.parts.map((p) => (
               <div key={p.part} hidden={tab !== p.part}>
-                <PartView info={p} entryTags={data.entryTags} studentId={data.student.id} active={tab === p.part} onChanged={refresh} />
+                <PartView info={p} entryTags={p.entryTags ?? data.entryTags} studentId={data.student.id} active={tab === p.part} onChanged={refresh} />
               </div>
             ))}
             {tab === "class" && <ClassBoard />}

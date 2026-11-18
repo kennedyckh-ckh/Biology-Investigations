@@ -12,7 +12,7 @@ import {
 } from "../authz";
 import { entriesWhere, validateTag, validateTable, saveImage, deleteImageFile, readImage } from "../entries";
 import { entryTagsFor, studentPart } from "../sessions";
-import { publishedShares, publishedAi, critiquePromptsOf, reactionsFor } from "../sharing";
+import { classBoardFor, critiquePromptsOf, reactionsFor } from "../sharing";
 import { attachmentRow, downloadInstructionFile } from "../instruction-files";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS } from "../constants";
 
@@ -23,7 +23,7 @@ route("GET", "/student/state", (ctx) => {
   const entryTags = entryTagsFor(sid);
   const parts = [1, 2, 3]
     .map((part) => {
-      const base = studentPart(sid, part, entryTags);
+      const base = studentPart(sid, part);
       if (!base || base.locked) return base;
       return {
         ...base,
@@ -85,7 +85,7 @@ route("POST", "/student/entries", (ctx) => {
   const b = ctx.body || {};
   const part = partNo(b.part);
   assertStudentCanEditOwnWork(sc, part);
-  const tag = validateTag(b.tag, entryTagsFor(num(sc.session.id)));
+  const tag = validateTag(b.tag, entryTagsFor(num(sc.session.id), part));
   const body = bodyText(b.body);
   const table = validateTable(b.table);
   const image = b.image ? saveImage(b.image) : null;
@@ -123,7 +123,7 @@ route("PATCH", "/student/entries/:id", (ctx) => {
   const vals: unknown[] = [];
   if ("tag" in b) {
     sets.push("tag=?");
-    vals.push(validateTag(b.tag, entryTagsFor(num(sc.session.id)), e.tag));
+    vals.push(validateTag(b.tag, entryTagsFor(num(sc.session.id), num(e.part)), e.tag));
   }
   if ("body" in b) {
     sets.push("body=?");
@@ -257,22 +257,16 @@ route("GET", "/student/reference", (ctx) => {
 
 route("GET", "/student/class", (ctx) => {
   const sc = requireStudent(ctx);
-  const prompts = critiquePromptsOf(sc.session).filter((p) => p.enabled);
-  return {
-    anonymised: !!num(sc.session.anonymise_sharing),
-    shares: publishedShares(sc.session, num(sc.student.id)),
-    ai: publishedAi(num(sc.session.id)),
-    prompts,
-  };
+  return classBoardFor(sc.session, num(sc.student.id));
 });
 
 route("POST", "/student/critiques", (ctx) => {
   const sc = requireStudent(ctx);
   const b = ctx.body || {};
   const shareId = int(b.shareId, "shareId");
-  const share = get("SELECT * FROM shares WHERE id=? AND session_id=?", shareId, num(sc.session.id));
+  const share = get("SELECT e.part FROM shares sh JOIN entries e ON e.id=sh.entry_id WHERE sh.id=? AND sh.session_id=? AND e.deleted_at IS NULL", shareId, num(sc.session.id));
   if (!share) throw notFound("That response is not shared with your class.");
-  const prompt = critiquePromptsOf(sc.session).find((p) => p.enabled && p.key === b.promptKey);
+  const prompt = critiquePromptsOf(sc.session, num(share.part)).find((p) => p.enabled && p.key === b.promptKey);
   if (!prompt) throw bad("That critique type is not enabled.");
   const body = str(b.body, LIMITS.critiqueMax, "Your critique");
   const n = num(get("SELECT COUNT(*) AS n FROM critiques WHERE share_id=? AND student_id=?", shareId, num(sc.student.id))!.n);
