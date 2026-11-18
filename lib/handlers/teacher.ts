@@ -102,20 +102,28 @@ route("PATCH", "/teacher/sessions/:id", (ctx) => {
   mustBeActive(s);
   const b = ctx.body || {};
   const sid = num(s.id);
+  let promptsJson: string | undefined;
+  if ("critiquePrompts" in b) {
+    if (!Array.isArray(b.critiquePrompts)) throw bad("Invalid critique prompts");
+    const defaults = new Map(DEFAULT_CRITIQUE_PROMPTS.map((p) => [p.key, p.label]));
+    const currentLabels = new Map(critiquePromptsOf(s).map((p) => [p.key, p.label]));
+    const next = (b.critiquePrompts as unknown[]).slice(0, 12).map((value) => {
+      if (!value || typeof value !== "object") throw bad("Invalid critique prompt");
+      const p = value as { key?: unknown; label?: unknown; enabled?: unknown };
+      const key = str(p.key, 40, "Prompt key");
+      const defaultLabel = defaults.get(key);
+      const label = p.label === undefined
+        ? currentLabels.get(key) ?? defaultLabel
+        : str(p.label, LIMITS.critiqueLabelMax, "Prompt label", { optional: !!defaultLabel }) || defaultLabel;
+      if (!label) throw bad("Prompt label is required");
+      return { key, label, enabled: !!p.enabled };
+    });
+    if (next.length) promptsJson = JSON.stringify(next);
+  }
   if ("title" in b) run("UPDATE sessions SET title=? WHERE id=?", str(b.title, 150, "Session title"), sid);
   if ("anonymiseSharing" in b) run("UPDATE sessions SET anonymise_sharing=? WHERE id=?", b.anonymiseSharing ? 1 : 0, sid);
   if ("aiCriteria" in b) run("UPDATE sessions SET ai_criteria=? WHERE id=?", str(b.aiCriteria, 2000, "AI criteria", { optional: true }), sid);
-  if ("critiquePrompts" in b) {
-    if (!Array.isArray(b.critiquePrompts)) throw bad("Invalid critique prompts");
-    const allowed = new Map(DEFAULT_CRITIQUE_PROMPTS.map((p) => [p.key, p.label]));
-    const cur = critiquePromptsOf(s);
-    const next = (b.critiquePrompts as { key?: string; label?: string; enabled?: boolean }[]).slice(0, 12).map((p) => {
-      const key = str(p.key, 40, "Prompt key");
-      const label = allowed.get(key) ?? str(p.label, 120, "Prompt label");
-      return { key, label, enabled: !!p.enabled };
-    });
-    run("UPDATE sessions SET critique_prompts_json=? WHERE id=?", JSON.stringify(next.length ? next : cur), sid);
-  }
+  if (promptsJson !== undefined) run("UPDATE sessions SET critique_prompts_json=? WHERE id=?", promptsJson, sid);
   audit("staff", ctx.auth.staff!.id, "session.update", `session:${sid}`);
   return sessionDetail(ownSession(ctx, sid));
 });
