@@ -81,6 +81,10 @@ export function designHintsFor(sessionId: number): DesignTagHint[] {
   return row ? JSON.parse(String(row.hints_json)) as DesignTagHint[] : [];
 }
 
+export function designHintsVisible(sessionId: number): boolean {
+  return !!get("SELECT 1 FROM design_hint_release WHERE session_id=?", sessionId);
+}
+
 export function setQuestions(sessionId: number, part: number, questions: string[]) {
   run("DELETE FROM session_questions WHERE session_id=? AND part=?", sessionId, part);
   questions.forEach((q, i) => run("INSERT INTO session_questions(session_id,part,position,text) VALUES(?,?,?,?)", sessionId, part, i, q));

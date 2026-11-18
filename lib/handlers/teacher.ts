@@ -1,7 +1,7 @@
 import { route, bad, forbidden, notFound, HttpError, str, int, partNo, safeLink } from "../router";
 import { all, get, run, tx, now, num, audit, type Row } from "../db";
-import { requireTeacher, ownSession, ownGroup, mustBeActive, submissionInfo, onlineEditors } from "../authz";
-import { createSession, partConfig, setQuestions, activeGroupIds, entryTagsFor, designHintsFor } from "../sessions";
+import { requireTeacher, ownSession, ownGroup, mustBeActive, submissionInfo, individualSubmissionInfo, onlineEditors } from "../authz";
+import { createSession, partConfig, setQuestions, activeGroupIds, entryTagsFor, designHintsFor, designHintsVisible } from "../sessions";
 import { entriesWhere, deleteImageFile } from "../entries";
 import { publishedShares, publishedAi, critiquePromptsOf, reactionsFor } from "../sharing";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS, DEFAULT_CRITIQUE_PROMPTS } from "../constants";
@@ -99,6 +99,17 @@ function sessionDetail(s: Row) {
 }
 
 route("GET", "/teacher/sessions/:id", (ctx) => sessionDetail(ownSession(ctx, ctx.params.id)));
+
+route("PUT", "/teacher/sessions/:id/design-tag-hints/visibility", (ctx) => {
+  const s = ownSession(ctx, ctx.params.id);
+  mustBeActive(s);
+  const sid = num(s.id);
+  const visible = ctx.body?.visible;
+  if (typeof visible !== "boolean") throw bad("Choose whether to show the design tag hints.");
+  if (visible) run("INSERT OR IGNORE INTO design_hint_release(session_id) VALUES(?)", sid);
+  else run("DELETE FROM design_hint_release WHERE session_id=?", sid);
+  return { visible };
+});
 
 route("PATCH", "/teacher/sessions/:id", (ctx) => {
   const s = ownSession(ctx, ctx.params.id);
@@ -327,6 +338,7 @@ route("GET", "/teacher/sessions/:id/status", (ctx) => {
       class: m.class,
       classNo: m.class_no,
       online: !!m.last_beat && now() - num(m.last_beat) < ONLINE_WINDOW_MS,
+      individualSubmissions: [1, 2, 3].map((part) => ({ part, ...individualSubmissionInfo(num(m.id), part) })),
     }));
     const parts = [1, 2, 3].map((part) => ({
       part,
@@ -345,7 +357,29 @@ route("GET", "/teacher/sessions/:id/status", (ctx) => {
   }));
   const recovery = all("SELECT r.id,r.created_at,s.name,s.class,s.class_no,g.name AS group_name FROM recovery_requests r JOIN students s ON s.id=r.student_id JOIN groups g ON g.id=s.group_id WHERE s.session_id=? AND r.approved_at IS NULL ORDER BY r.id", sid).map((r) => ({ id: num(r.id), name: r.name, class: r.class, classNo: r.class_no, group: r.group_name, createdAt: num(r.created_at) }));
   const overrides = all("SELECT part,reason,at,missing_groups_json FROM part_overrides WHERE session_id=? ORDER BY id DESC", sid).map((o) => ({ part: num(o.part), reason: o.reason, at: num(o.at), missing: JSON.parse(String(o.missing_groups_json)) }));
-  return { status: s.status, parts: partConfig(sid).map((p) => ({ part: p.part, title: PART_TITLES[p.part], visibility: p.visibility })), groups, summary, recovery, overrides };
+  return { status: s.status, designHintsVisible: designHintsVisible(sid), parts: partConfig(sid).map((p) => ({ part: p.part, title: PART_TITLES[p.part], visibility: p.visibility })), groups, summary, recovery, overrides };
+});
+
+const individualPath = "/teacher/sessions/:id/students/:studentId/parts/:part/submission";
+function individualTarget(ctx: Parameters<typeof ownSession>[0]) {
+  const s = ownSession(ctx, ctx.params.id);
+  const student = get("SELECT id,name,group_id FROM students WHERE id=? AND session_id=?", int(ctx.params.studentId, "Student ID"), num(s.id));
+  if (!student) throw notFound("Student not found in this session.");
+  return { s, student, studentId: num(student.id), part: partNo(ctx.params.part) };
+}
+route("GET", individualPath, (ctx) => {
+  const { student, studentId, part } = individualTarget(ctx);
+  const row = get("SELECT revision,submitted_at,snapshot_json,unlocked_at FROM individual_submissions WHERE student_id=? AND part=? ORDER BY revision DESC LIMIT 1", studentId, part);
+  if (!row) throw notFound("This student has not submitted individual work for this part.");
+  return { name: student.name, revision: num(row.revision), submittedAt: num(row.submitted_at), entries: JSON.parse(String(row.snapshot_json)), reopened: !!row.unlocked_at };
+});
+route("POST", individualPath, (ctx) => {
+  const { s, studentId, part } = individualTarget(ctx);
+  mustBeActive(s);
+  const latest = individualSubmissionInfo(studentId, part);
+  if (latest.status !== "submitted") throw new HttpError(409, "not_submitted", "There is no locked individual submission for this part.");
+  run("UPDATE individual_submissions SET unlocked_at=? WHERE student_id=? AND part=? AND revision=?", now(), studentId, part, latest.revision);
+  return { ok: true };
 });
 
 route("GET", "/teacher/sessions/:id/entries", (ctx) => {

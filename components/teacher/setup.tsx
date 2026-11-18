@@ -117,7 +117,7 @@ function SessionSettings({ session, onSaved, disabled }: { session: SessionDetai
       <details className="rounded-lg border border-slate-200 p-3">
         <summary className="cursor-pointer text-sm font-semibold">Design tag hints</summary>
         <div className="mt-3 space-y-3">
-          <p className="text-sm text-slate-600">Write a short definition, example or question. Students can open it in Part 1.</p>
+          <p className="text-sm text-slate-600">Write a short definition, example or question. These stay hidden until you click “Show design tag hints” in the Live monitor.</p>
           {activeHintTag ? (
             <>
               <Field label="Choose a tag">

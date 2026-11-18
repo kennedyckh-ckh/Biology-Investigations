@@ -38,8 +38,21 @@ The four `INITIAL_…` values are only used to create the first two staff accoun
 
 - In **Setup**, upload, replace or remove the **Instruction file** in each part. Students can download it once that part is open. Uploaded files are downloads, not embedded previews; upload only files suitable for your class.
 - In **Setup → Session settings → Customise entry tags**, edit the list one tag per line, then click **Save settings**. Defaults apply until customised. Existing entries retain their original tags.
-- In **Setup → Session settings**, add or rename peer critique prompts and add **Design tag hints** for any configured tag. Part 1 students can open the hint panel and select a tag to read its definition or example.
+- In **Setup → Session settings**, add or rename peer critique prompts and write **Design tag hints**. Hints start hidden. Click **Live monitor → Show design tag hints** to make the panel available to students while Part 1 is open, and **Hide design tag hints** to withdraw it.
+- Students can click **Submit my work** for each open part. It submits only their own entries and does not submit or lock classmates' work. Teachers can review and reopen individual submissions under **Live monitor → Group progress**. Group submission is still a separate action.
 - In **Class board**, students can Star or Heart a peer's shared response. Selecting the same reaction again removes it. Only aggregate counts and the student's own selection are shown, not the names of students who reacted.
+
+## AI API usage and limits
+
+The **API usage** page is available from both staff dashboards. Both roles see shared totals and limits; teachers also see their own monthly totals. It does not display the API key or include mock analyses or activity outside this app.
+
+| Render environment variable | Default |
+|---|---:|
+| `AI_DAILY_REQUEST_LIMIT` | 20 requests per UTC day |
+| `AI_MONTHLY_REQUEST_LIMIT` | 100 requests per UTC calendar month |
+| `AI_MONTHLY_TOKEN_LIMIT` | 1,000,000 tokens per UTC calendar month |
+
+These are installation-wide app limits, not the upstream provider's billing or account limits. Set them at or below the allowance for this installation in Render's Environment settings. Enter `0` for any limit to stop live API requests. Each live attempt reserves a request and a conservative token allowance before sending; if the provider returns usage, that total replaces the allowance. Failed or interrupted attempts with unknown consumption keep their allowance. Tracking starts once this update is deployed. Consider using a dedicated key and setting an independent provider quota or spending limit where available.
 
 ## Local test accounts (seeded on first start)
 

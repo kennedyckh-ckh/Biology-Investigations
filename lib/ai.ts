@@ -70,7 +70,12 @@ export interface AiContent {
 
 export interface AiProvider {
   name: string;
-  generate(req: AiRequest): Promise<AiContent>;
+  generate(req: AiRequest, usage?: AiUsageTracker): Promise<AiContent>;
+}
+
+export interface AiUsageTracker {
+  reserve(tokenAllowance: number): number;
+  finish(id: number, ok: boolean, reportedTokens: number | null): void;
 }
 
 export class AiError extends Error {
@@ -1196,7 +1201,7 @@ function parseLlmResponse(data: unknown): unknown {
 export const llmProvider: AiProvider = {
   name: "hku-llm",
 
-  async generate(req: AiRequest): Promise<AiContent> {
+  async generate(req: AiRequest, usage?: AiUsageTracker): Promise<AiContent> {
     validateRequest(req);
 
     const apiKey = process.env.HKU_OPENAI_API_KEY?.trim();
@@ -1214,6 +1219,11 @@ export const llmProvider: AiProvider = {
 
     const url = buildLlmUrl(rawEndpoint, deployment, apiVersion);
     const { system, user } = buildPrompt(req);
+    const maxTokens = 2000;
+    // Reserve a conservative byte-based input allowance, message overhead, and maximum output.
+    const reservation = usage?.reserve(Buffer.byteLength(system) + Buffer.byteLength(user) + 1024 + maxTokens);
+    let reportedTokens: number | null = null;
+    let succeeded = false;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60_000);
@@ -1221,6 +1231,7 @@ export const llmProvider: AiProvider = {
     try {
       const response = await fetch(url, {
         method: "POST",
+        redirect: "error",
         headers: {
           "Content-Type": "application/json",
           "api-key": apiKey,
@@ -1231,6 +1242,7 @@ export const llmProvider: AiProvider = {
           model: deployment,
           response_format: { type: "json_object" },
           temperature: 0.3,
+          max_tokens: maxTokens,
           messages: [
             { role: "system", content: system },
             { role: "user", content: user },
@@ -1255,8 +1267,12 @@ export const llmProvider: AiProvider = {
         throw new AiError("ai_invalid_response", "HKU API did not return a valid JSON response.");
       }
 
+      const total = (data as { usage?: { total_tokens?: unknown } } | null)?.usage?.total_tokens;
+      if (typeof total === "number" && Number.isSafeInteger(total) && total > 0 && total <= 1_000_000_000) reportedTokens = total;
       const raw = parseLlmResponse(data);
-      return validateForRequest(raw, req).content;
+      const result = validateForRequest(raw, req).content;
+      succeeded = true;
+      return result;
     } catch (error: unknown) {
       if (error instanceof AiError) throw error;
       if (controller.signal.aborted) {
@@ -1268,6 +1284,7 @@ export const llmProvider: AiProvider = {
       );
     } finally {
       clearTimeout(timeout);
+      if (reservation !== undefined) usage?.finish(reservation, succeeded, reportedTokens);
     }
   },
 };
@@ -1278,13 +1295,6 @@ export const llmProvider: AiProvider = {
 
 export function getProvider(): AiProvider {
   const mode = (process.env.AI_PROVIDER || "").trim().toLowerCase();
-
-  console.info("[AI configuration]", {
-    mode,
-    hasApiKey: Boolean(process.env.HKU_OPENAI_API_KEY?.trim()),
-    hasEndpoint: Boolean(process.env.HKU_OPENAI_ENDPOINT?.trim()),
-    hasModel: Boolean(process.env.AI_MODEL?.trim()),
-  });
 
   if (mode === "llm") return llmProvider;
   if (mode === "mock") return mockProvider;

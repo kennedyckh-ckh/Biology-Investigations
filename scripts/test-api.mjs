@@ -64,6 +64,12 @@ async function main() {
   eq("educator cannot create a session", (await api(ed, "POST", "/teacher/sessions", { title: "x" })).status, 403);
   eq("teacher cannot open educator templates", (await api(t1, "GET", "/educator/templates")).status, 403);
   eq("non-JSON mutation rejected (CSRF guard)", (await api(anon, "POST", "/auth/login", null, { contentType: "text/plain", rawBody: "a=b" })).status, 415);
+  eq("API usage requires staff authentication", (await api(anon, "GET", "/teacher/api-usage")).status, 401);
+  eq("teacher cannot use educator API usage route", (await api(t1, "GET", "/educator/api-usage")).status, 403);
+  const teacherUsage = await api(t1, "GET", "/teacher/api-usage");
+  const educatorUsage = await api(ed, "GET", "/educator/api-usage");
+  check("both staff roles can see shared API caps", teacherUsage.status === 200 && educatorUsage.status === 200 && teacherUsage.json.daily.limit === educatorUsage.json.daily.limit);
+  check("teacher usage is scoped to the teacher and educator totals are aggregate", teacherUsage.json.own?.requests === 0 && educatorUsage.json.own === null && !("apiKey" in educatorUsage.json));
 
   section("Teacher Educator templates & assignment");
   const tpls = (await api(ed, "GET", "/educator/templates")).json.templates;
@@ -194,8 +200,15 @@ async function main() {
   eq("design hint must belong to a configured tag", (await api(t1, "PATCH", sessionBase, { designTagHints: [{ tag: "Not a tag", hint: "Example" }] })).status, 400);
   eq("teacher saves design hints", (await api(t1, "PATCH", sessionBase, { designTagHints: designHint })).status, 200);
   state = (await api(s1, "GET", "/student/state")).json;
+  check("saved design hints stay hidden until released", !("designTagHints" in state.parts[0]));
+  const hintVisibility = `${sessionBase}/design-tag-hints/visibility`;
+  eq("another teacher cannot release hints", (await api(t2, "PUT", hintVisibility, { visible: true })).status, 404);
+  eq("owning teacher can release hints", (await api(t1, "PUT", hintVisibility, { visible: true })).status, 200);
+  state = (await api(s1, "GET", "/student/state")).json;
   eq("students receive the hint for Part 1", state.parts[0].designTagHints[0].hint, designHint[0].hint);
   check("design hints are not included outside Part 1", !state.parts[1].designTagHints);
+  eq("teacher can hide hints again", (await api(t1, "PUT", hintVisibility, { visible: false })).status, 200);
+  check("hidden hint content is not sent to students", !JSON.stringify((await api(s1, "GET", "/student/state")).json).includes(designHint[0].hint));
   eq("student sees 3 parts", state.parts.length, 3);
   check("locked Part 2 carries no instructions/questions", state.parts[1].locked && !("instructions" in state.parts[1]) && !("questions" in state.parts[1]));
   eq("Part 2 entries -> 403 while locked", (await api(s1, "GET", "/student/entries?part=2")).status, 403);
@@ -235,6 +248,26 @@ async function main() {
   const t2img = await fetch(`${BASE}/api/images/${e1.id}`, { headers: { Cookie: `si_staff=${t2.cookies.si_staff}` } });
   eq("other teacher cannot load image", t2img.status, 404);
 
+  section("Individual submissions");
+  const submitMine = (who, part = 1) => api(who, "POST", "/student/submit-individual", { part, confirm: true });
+  eq("student cannot submit a locked part", (await submitMine(s1, 2)).status, 403);
+  eq("student cannot submit without any own entries", (await submitMine(s3)).json?.error, "nothing_to_submit");
+  eq("student submits their own entries", (await submitMine(s1)).json?.individualSubmission?.status, "submitted");
+  eq("same individual submission cannot be sent twice", (await submitMine(s1)).status, 409);
+  eq("student cannot edit locked individual work", (await api(s1, "PATCH", `/student/entries/${e1.id}`, { body: "late" })).json?.error, "individual_submitted");
+  eq("teammate can edit despite a peer's individual submission", (await api(s2, "PATCH", `/student/entries/${e2.id}`, { body: "Compare three brands" })).status, 200);
+  const one = (await api(s1, "GET", "/student/entries?part=1")).json;
+  eq("individual submission does not submit the group", one.submission.status, "draft");
+  const studentId = (await api(s1, "GET", "/student/state")).json.student.id;
+  const individualPath = `${sessionBase}/students/${studentId}/parts/1/submission`;
+  const individualCopy = await api(t1, "GET", individualPath);
+  check("teacher sees only this student's submitted entries", individualCopy.json?.entries?.length === 1 && individualCopy.json.entries[0].id === e1.id);
+  eq("another teacher cannot see the individual submission", (await api(t2, "GET", individualPath)).status, 404);
+  eq("teacher can reopen individual work", (await api(t1, "POST", individualPath)).status, 200);
+  eq("reopening allows student edits", (await api(s1, "PATCH", `/student/entries/${e1.id}`, { body: "Thicker towels absorb more water" })).status, 200);
+  eq("a resubmission creates revision two", (await submitMine(s1)).json?.individualSubmission?.revision, 2);
+  await api(t1, "POST", individualPath);
+
   section("Collective submission safeguard");
   eq("presence heartbeat", (await api(s2, "POST", "/student/presence", { part: 1, editingEntryId: e2.id })).status, 200);
   const chk = (await api(s1, "GET", "/student/submit-check?part=1")).json;
@@ -249,6 +282,7 @@ async function main() {
   eq("teammate cannot edit after submission", (await api(s2, "PATCH", `/student/entries/${e2.id}`, { body: "late" })).json?.error, "part_submitted");
   eq("cannot add entries after submission", (await api(s2, "POST", "/student/entries", { part: 1, body: "late" })).json?.error, "part_submitted");
   eq("cannot submit twice", (await api(s2, "POST", "/student/submit", { part: 1, confirm: true })).status, 403);
+  eq("student can separately submit saved work after group submission", (await submitMine(s2)).json?.individualSubmission?.status, "submitted");
 
   section("Stage unlocking & deliberate override");
   const blocked = await api(t1, "POST", `/teacher/sessions/${sid}/parts/2/visibility`, { visibility: "open" });
@@ -275,6 +309,9 @@ async function main() {
   section("Unlock a submission for revision");
   eq("student cannot unlock", (await api(s1, "POST", `/teacher/sessions/${sid}/unlock-submission`, { groupId: gA, part: 1 })).status, 401);
   eq("teacher unlocks Group A Part 1", (await api(t1, "POST", `/teacher/sessions/${sid}/unlock-submission`, { groupId: gA, part: 1 })).status, 200);
+  eq("reopening the group does not reopen an individual's work", (await api(s2, "PATCH", `/student/entries/${e2.id}`, { body: "still locked" })).json?.error, "individual_submitted");
+  const student2Id = (await api(s2, "GET", "/student/state")).json.student.id;
+  await api(t1, "POST", `${sessionBase}/students/${student2Id}/parts/1/submission`);
   eq("group can revise after unlock", (await api(s2, "PATCH", `/student/entries/${e2.id}`, { body: "Compare three brands fairly" })).status, 200);
   eq("resubmission creates revision 2", (await api(s2, "POST", "/student/submit", { part: 1, confirm: true })).json?.submission?.revision, 2);
 

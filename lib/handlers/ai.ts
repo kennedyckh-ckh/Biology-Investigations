@@ -1,10 +1,24 @@
 import { route, bad, forbidden, notFound, HttpError, str, partNo, int } from "../router";
 import { all, get, run, now, num, audit, type Row } from "../db";
-import { ownSession, ownGroup, mustBeActive } from "../authz";
+import { ownSession, ownGroup, mustBeActive, requireTeacher, requireEducator } from "../authz";
 import { entriesWhere } from "../entries";
 import { getProvider, validateContent, AiError, type AiEntry, type AiKind } from "../ai";
+import { apiUsage, finishApiRequest, reserveApiRequest } from "../api-usage";
 
 const KINDS: AiKind[] = ["group_summary", "cross_group", "discussion_points"];
+
+function usageOverview(teacherId?: number) {
+  let mode: "mock" | "live" | "unconfigured";
+  try {
+    mode = getProvider().name === "mock-rule-based" ? "mock" :
+      [process.env.HKU_OPENAI_API_KEY, process.env.HKU_OPENAI_ENDPOINT, process.env.AI_MODEL].every((v) => v?.trim()) ? "live" : "unconfigured";
+  } catch {
+    mode = "unconfigured";
+  }
+  return { mode, ...apiUsage(teacherId) };
+}
+route("GET", "/teacher/api-usage", (ctx) => usageOverview(requireTeacher(ctx).id));
+route("GET", "/educator/api-usage", (ctx) => { requireEducator(ctx); return usageOverview(); });
 
 /** Teacher-only: AI drafts are never visible to students until published/revealed. */
 function dto(o: Row, groups: Map<number, string>) {
@@ -69,10 +83,14 @@ route("POST", "/teacher/sessions/:id/ai/generate", async (ctx) => {
       hasImage: e.hasImage,
     };
   });
-  const provider = getProvider();
   let content, cited;
+  let provider;
   try {
-    const out = await provider.generate({ kind, part, criteria, groupLabel: groupId !== null ? entries[0].group : undefined, entries });
+    provider = getProvider();
+    const out = await provider.generate({ kind, part, criteria, groupLabel: groupId !== null ? entries[0].group : undefined, entries }, {
+      reserve: (allowance) => reserveApiRequest(ctx.auth.staff!.id, allowance),
+      finish: finishApiRequest,
+    });
     ({ content, cited } = validateContent(out, new Set(entries.map((e) => e.id)), { requireQuestions: kind === "discussion_points" }));
   } catch (e) {
     if (e instanceof AiError) throw new HttpError(e.code === "ai_not_configured" ? 501 : 502, e.code, e.message);

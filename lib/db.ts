@@ -113,6 +113,9 @@ CREATE TABLE IF NOT EXISTS design_tag_hints(
   session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
   hints_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS design_hint_release(
+  session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS instruction_attachments(
   session_id INTEGER NOT NULL,
   part INTEGER NOT NULL,
@@ -191,6 +194,15 @@ CREATE TABLE IF NOT EXISTS part_overrides(
   missing_groups_json TEXT NOT NULL,
   at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS individual_submissions(
+  student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  part INTEGER NOT NULL CHECK(part IN (1,2,3)),
+  revision INTEGER NOT NULL,
+  submitted_at INTEGER NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  unlocked_at INTEGER,
+  PRIMARY KEY(student_id, part, revision)
+);
 CREATE TABLE IF NOT EXISTS shares(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -237,6 +249,15 @@ CREATE TABLE IF NOT EXISTS audit_log(
   target TEXT,
   at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ai_api_requests(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  teacher_id INTEGER NOT NULL,
+  started_at INTEGER NOT NULL,
+  reserved_tokens INTEGER NOT NULL,
+  actual_tokens INTEGER,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','complete','failed'))
+);
+CREATE INDEX IF NOT EXISTS idx_ai_api_requests_started ON ai_api_requests(started_at);
 `;
 
 type G = typeof globalThis & { __db?: DB };
