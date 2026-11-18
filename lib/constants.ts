@@ -40,6 +40,7 @@ export const LIMITS = {
   nameMax: 60,
   classMax: 20,
   critiqueMax: 1000,
+  critiqueLabelMax: 120,
 };
 
 export const ONLINE_WINDOW_MS = 15000;

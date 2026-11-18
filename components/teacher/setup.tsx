@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/client/api";
 import { Field, useToast } from "@/components/ui";
-import { PART_TITLES } from "@/lib/constants";
+import { LIMITS, PART_TITLES } from "@/lib/constants";
 import type { SessionDetail, PartCfg } from "./types";
 
 export function Setup({ session, onSaved }: { session: SessionDetail; onSaved: () => void }) {
@@ -35,10 +35,14 @@ function SessionSettings({ session, onSaved, disabled }: { session: SessionDetai
   const [criteria, setCriteria] = useState(session.aiCriteria);
   const [prompts, setPrompts] = useState(session.critiquePrompts);
   const [busy, setBusy] = useState(false);
+  function updatePrompt(key: string, update: { label?: string; enabled?: boolean }) {
+    setPrompts((ps) => ps.map((p) => p.key === key ? { ...p, ...update } : p));
+  }
   async function save() {
     setBusy(true);
     try {
-      await api("PATCH", `/teacher/sessions/${session.id}`, { title, aiCriteria: criteria, critiquePrompts: prompts });
+      const saved = await api<SessionDetail>("PATCH", `/teacher/sessions/${session.id}`, { title, aiCriteria: criteria, critiquePrompts: prompts });
+      setPrompts(saved.critiquePrompts);
       toast("Session settings saved");
       onSaved();
     } catch (e) {
@@ -51,21 +55,33 @@ function SessionSettings({ session, onSaved, disabled }: { session: SessionDetai
     <section className="card space-y-4">
       <h3 className="text-lg font-bold">Session settings</h3>
       <Field label="Session title">
-        <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} disabled={disabled} maxLength={150} />
+        <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} disabled={busy || disabled} maxLength={150} />
       </Field>
-      <div>
-        <span className="label">Peer critique prompts students can use on shared responses</span>
+      <fieldset disabled={busy || disabled} aria-describedby="critique-prompts-help">
+        <legend className="label">Peer critique prompts students can use on shared responses</legend>
+        <p id="critique-prompts-help" className="mb-2 text-xs text-slate-500">
+          Edit the wording for this session and tick the prompts students can use. Clear a built-in label to restore its original wording when you save.
+        </p>
         <div className="grid gap-2 sm:grid-cols-2">
           {prompts.map((p, i) => (
-            <label key={p.key} className="flex items-center gap-2 rounded-lg border border-slate-200 p-2 text-sm">
-              <input type="checkbox" checked={p.enabled} disabled={disabled} onChange={(e) => setPrompts((ps) => ps.map((x, j) => (j === i ? { ...x, enabled: e.target.checked } : x)))} />
-              {p.label}
-            </label>
+            <div key={p.key} className="flex min-w-0 items-center gap-1 rounded-lg border border-slate-200 p-1.5">
+              <label className="flex h-11 w-11 shrink-0 items-center justify-center">
+                <span className="sr-only">Use prompt {i + 1}</span>
+                <input type="checkbox" checked={p.enabled} onChange={(e) => updatePrompt(p.key, { enabled: e.target.checked })} />
+              </label>
+              <input
+                className="input min-h-11 min-w-0"
+                aria-label={`Prompt ${i + 1} label`}
+                value={p.label}
+                onChange={(e) => updatePrompt(p.key, { label: e.target.value })}
+                maxLength={LIMITS.critiqueLabelMax}
+              />
+            </div>
           ))}
         </div>
-      </div>
+      </fieldset>
       <Field label="Criteria for AI analysis" hint="What should the AI look for? It always prioritises divergent findings, uncontrolled variables, evidence-to-claim gaps and misconceptions.">
-        <textarea className="input min-h-[80px]" value={criteria} onChange={(e) => setCriteria(e.target.value)} disabled={disabled} maxLength={2000} />
+        <textarea className="input min-h-[80px]" value={criteria} onChange={(e) => setCriteria(e.target.value)} disabled={busy || disabled} maxLength={2000} />
       </Field>
       <button className="btn-primary" disabled={busy || disabled} onClick={save}>
         Save settings

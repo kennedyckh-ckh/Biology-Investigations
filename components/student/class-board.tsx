@@ -79,7 +79,8 @@ export function ClassBoard() {
 
 function ShareCard({ s, prompts, onChanged }: { s: ClassResp["shares"][number]; prompts: ClassResp["prompts"]; onChanged: () => void }) {
   const toast = useToast();
-  const [key, setKey] = useState(prompts[0]?.key ?? "");
+  const [selectedKey, setSelectedKey] = useState("");
+  const key = prompts.some((p) => p.key === selectedKey) ? selectedKey : prompts[0]?.key ?? "";
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   async function post() {
@@ -128,7 +129,7 @@ function ShareCard({ s, prompts, onChanged }: { s: ClassResp["shares"][number]; 
         )}
         {prompts.length > 0 ? (
           <div className="space-y-2">
-            <select className="input" value={key} onChange={(e) => setKey(e.target.value)} aria-label="Type of critique">
+            <select className="input" value={key} onChange={(e) => setSelectedKey(e.target.value)} aria-label="Type of critique">
               {prompts.map((p) => (
                 <option key={p.key} value={p.key}>
                   {p.label}

@@ -50,13 +50,14 @@ const login = async (who, email, password) => api(who, "POST", "/auth/login", { 
 async function main() {
   const t1 = actor("teacher1"), t2 = actor("teacher2"), t3 = actor("teacher3"), ed = actor("educator");
   const anon = actor("anon");
+  const demoEducator = (await api(anon, "GET", "/auth/demo-accounts")).json?.accounts?.find((a) => a.role === "educator");
 
   section("Authentication & RBAC");
   eq("wrong password -> 401", (await login(actor("x"), "teacher1@school.test", "nope")).status, 401);
   eq("teacher1 login", (await login(t1, "teacher1@school.test", "Teacher1!demo")).status, 200);
   eq("teacher2 login", (await login(t2, "teacher2@school.test", "Teacher2!demo")).status, 200);
   eq("teacher3 login", (await login(t3, "teacher3@school.test", "Teacher3!demo")).status, 200);
-  eq("educator login", (await login(ed, "educator@school.test", "Educator1!demo")).status, 200);
+  eq("educator login", (await login(ed, demoEducator?.email ?? "educator@school.test", demoEducator?.password ?? "Educator1!demo")).status, 200);
   eq("unauthenticated teacher route -> 401", (await api(anon, "GET", "/teacher/sessions")).status, 401);
   eq("unauthenticated educator route -> 401", (await api(anon, "GET", "/educator/templates")).status, 401);
   eq("educator cannot list teacher sessions", (await api(ed, "GET", "/teacher/sessions")).status, 403);
@@ -250,7 +251,32 @@ async function main() {
   eq("disabled critique prompt rejected", (await api(s3, "POST", "/student/critiques", { shareId: cls.shares[0].shareId, promptKey: "improve", body: "x" })).status, 400);
   cls = (await api(s1, "GET", "/student/class")).json;
   eq("critique visible to class, author anonymised", cls.shares[0].critiques[0].authorLabel, "A classmate");
-  await api(t1, "POST", `/teacher/sessions/${sid}/critiques/${cls.shares[0].critiques[0].id}/hide`, { hidden: true });
+  const critiqueId = cls.shares[0].critiques[0].id;
+  const sessionPath = `/teacher/sessions/${sid}`;
+  const defaultLabel = "Identify a confounding variable";
+  const customLabel = "Name one factor that could skew the results";
+  const promptList = (await api(t1, "GET", sessionPath)).json.critiquePrompts;
+  const findPrompt = (list, key = "confounding") => list.find((p) => p.key === key);
+  const changePrompt = (patch) => ({ critiquePrompts: promptList.map((p) => p.key === "confounding" ? { ...p, ...patch } : p) });
+  eq("session starts with built-in critique wording", findPrompt(promptList).label, defaultLabel);
+  eq("another teacher cannot rename a prompt", (await api(t2, "PATCH", sessionPath, changePrompt({ label: customLabel }))).status, 404);
+  eq("a student cannot rename a prompt", (await api(s1, "PATCH", sessionPath, changePrompt({ label: customLabel }))).status, 401);
+  eq("invalid prompt wording is rejected", (await api(t1, "PATCH", sessionPath, { ...changePrompt({ label: "a".repeat(121) }), title: "Should not save" })).status, 400);
+  eq("invalid prompt edit does not save other settings", (await api(t1, "GET", sessionPath)).json.title, "Period 3 Investigation");
+  eq("teacher saves custom wording", (await api(t1, "PATCH", sessionPath, changePrompt({ label: `  ${customLabel}  ` }))).status, 200);
+  eq("checkbox-only save preserves custom wording", findPrompt((await api(t1, "PATCH", sessionPath, changePrompt({ label: undefined }))).json.critiquePrompts).label, customLabel);
+  eq("custom wording persists in the session", findPrompt((await api(t1, "GET", sessionPath)).json.critiquePrompts).label, customLabel);
+  cls = (await api(s1, "GET", "/student/class")).json;
+  eq("student can select the renamed prompt", findPrompt(cls.prompts).label, customLabel);
+  eq("existing critique uses the renamed label on the class board", cls.shares[0].critiques[0].promptLabel, customLabel);
+  eq("existing critique uses the renamed label in teacher sharing", (await api(t1, "GET", `${sessionPath}/shares`)).json.shares[0].critiques[0].promptLabel, customLabel);
+  eq("existing critique uses the renamed label on the projector", (await api(t1, "GET", `${sessionPath}/projector`)).json.shares[0].critiques[0].promptLabel, customLabel);
+  await api(t1, "PATCH", sessionPath, changePrompt({ label: customLabel, enabled: false }));
+  cls = (await api(s1, "GET", "/student/class")).json;
+  check("disabled custom prompt is hidden without removing existing critiques", !findPrompt(cls.prompts) && cls.shares[0].critiques[0].id === critiqueId);
+  const reset = findPrompt((await api(t1, "PATCH", sessionPath, changePrompt({ label: "  ", enabled: false }))).json.critiquePrompts);
+  check("clearing a built-in label restores the default and keeps its checkbox", reset.label === defaultLabel && reset.enabled === false);
+  await api(t1, "POST", `/teacher/sessions/${sid}/critiques/${critiqueId}/hide`, { hidden: true });
   eq("teacher can hide a critique", (await api(s1, "GET", "/student/class")).json.shares[0].critiques.length, 0);
 
   section("Projector view shows only published content");
