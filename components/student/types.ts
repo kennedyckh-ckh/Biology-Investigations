@@ -1,5 +1,5 @@
 import type { TableData } from "@/components/ui";
-import type { InstructionFile } from "@/lib/constants";
+import type { DesignTagHint, InstructionFile } from "@/lib/constants";
 
 export interface Entry {
   id: number;
@@ -26,6 +26,7 @@ export interface PartInfo {
   instructions?: string;
   webLink?: string;
   attachment?: InstructionFile | null;
+  designTagHints?: DesignTagHint[];
   questions?: { id: number; text: string }[];
   submission?: Submission;
   entryCount?: number;

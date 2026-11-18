@@ -141,6 +141,22 @@ export function PartView({ info, entryTags, studentId, active, onChanged }: { in
         <GuidingQuestions qs={info.questions ?? []} />
       </div>
 
+      {info.part === 1 && (
+        <details className="card">
+          <summary className="cursor-pointer font-semibold text-blue-900">Design tag hints</summary>
+          {info.designTagHints?.length ? (
+            <div className="mt-3 space-y-2">
+              {info.designTagHints.map(({ tag, hint }) => (
+                <details key={tag} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <summary className="cursor-pointer py-1 text-sm font-semibold">{tag}</summary>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{hint}</p>
+                </details>
+              ))}
+            </div>
+          ) : <p className="mt-2 text-sm text-slate-600">Your teacher has not added any tag hints yet.</p>}
+        </details>
+      )}
+
       {sub.status === "submitted" && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900" role="status">
           <b>Submitted</b> by your group{sub.submittedAt ? ` on ${fmtTime(sub.submittedAt)}` : ""}

@@ -1,7 +1,7 @@
 import { route, bad, forbidden, notFound, HttpError, str, int, partNo, safeLink } from "../router";
 import { all, get, run, tx, now, num, audit, type Row } from "../db";
 import { requireTeacher, ownSession, ownGroup, mustBeActive, submissionInfo, onlineEditors } from "../authz";
-import { createSession, partConfig, setQuestions, activeGroupIds, entryTagsFor } from "../sessions";
+import { createSession, partConfig, setQuestions, activeGroupIds, entryTagsFor, designHintsFor } from "../sessions";
 import { entriesWhere, deleteImageFile } from "../entries";
 import { publishedShares, publishedAi, critiquePromptsOf, reactionsFor } from "../sharing";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS, DEFAULT_CRITIQUE_PROMPTS } from "../constants";
@@ -83,6 +83,7 @@ function sessionDetail(s: Row) {
     anonymiseSharing: !!num(s.anonymise_sharing),
     critiquePrompts: critiquePromptsOf(s),
     entryTags: entryTagsFor(sid),
+    designTagHints: designHintsFor(sid),
     aiCriteria: s.ai_criteria,
     pedagogyNotes: s.pedagogy_notes,
     source: s.source_template_id ? { templateId: num(s.source_template_id), title: src?.title ?? "(removed)", importedVersion: num(s.source_version), currentVersion: src ? num(src.version) : null } : null,
@@ -116,10 +117,10 @@ route("PATCH", "/teacher/sessions/:id", (ctx) => {
   }
   let promptsJson: string | undefined;
   if ("critiquePrompts" in b) {
-    if (!Array.isArray(b.critiquePrompts)) throw bad("Invalid critique prompts");
+    if (!Array.isArray(b.critiquePrompts) || b.critiquePrompts.length > LIMITS.critiquePromptCount) throw bad(`Use up to ${LIMITS.critiquePromptCount} critique prompts.`);
     const defaults = new Map(DEFAULT_CRITIQUE_PROMPTS.map((p) => [p.key, p.label]));
     const currentLabels = new Map(critiquePromptsOf(s).map((p) => [p.key, p.label]));
-    const next = (b.critiquePrompts as unknown[]).slice(0, 12).map((value) => {
+    const next = (b.critiquePrompts as unknown[]).map((value) => {
       if (!value || typeof value !== "object") throw bad("Invalid critique prompt");
       const p = value as { key?: unknown; label?: unknown; enabled?: unknown };
       const key = str(p.key, 40, "Prompt key");
@@ -130,7 +131,22 @@ route("PATCH", "/teacher/sessions/:id", (ctx) => {
       if (!label) throw bad("Prompt label is required");
       return { key, label, enabled: !!p.enabled };
     });
+    if (new Set(next.map((prompt) => prompt.key)).size !== next.length) throw bad("Critique prompt keys must be unique.");
     if (next.length) promptsJson = JSON.stringify(next);
+  }
+  let hintsJson: string | undefined;
+  if ("designTagHints" in b) {
+    if (!Array.isArray(b.designTagHints) || b.designTagHints.length > LIMITS.entryTagCount) throw bad(`Use up to ${LIMITS.entryTagCount} design tag hints.`);
+    const validTags = tags ?? entryTagsFor(sid);
+    const next = (b.designTagHints as unknown[]).map((value) => {
+      if (!value || typeof value !== "object") throw bad("Invalid design tag hint.");
+      const hint = value as { tag?: unknown; hint?: unknown };
+      const tag = str(hint.tag, LIMITS.entryTagMax, "Entry tag");
+      if (!validTags.includes(tag)) throw bad("Design hints must use a tag from this session.");
+      return { tag, hint: str(hint.hint, LIMITS.designHintMax, "Design hint", { optional: true }) };
+    });
+    if (new Set(next.map((record) => record.tag)).size !== next.length) throw bad("Use one hint per tag.");
+    hintsJson = JSON.stringify(next.filter((record) => record.hint));
   }
   if ("title" in b) run("UPDATE sessions SET title=? WHERE id=?", str(b.title, 150, "Session title"), sid);
   if ("anonymiseSharing" in b) run("UPDATE sessions SET anonymise_sharing=? WHERE id=?", b.anonymiseSharing ? 1 : 0, sid);
@@ -138,6 +154,9 @@ route("PATCH", "/teacher/sessions/:id", (ctx) => {
   if (promptsJson !== undefined) run("UPDATE sessions SET critique_prompts_json=? WHERE id=?", promptsJson, sid);
   if (tags !== undefined) {
     run("INSERT INTO session_entry_tags(session_id,tags_json) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET tags_json=excluded.tags_json", sid, JSON.stringify(tags));
+  }
+  if (hintsJson !== undefined) {
+    run("INSERT INTO design_tag_hints(session_id,hints_json) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET hints_json=excluded.hints_json", sid, hintsJson);
   }
   audit("staff", ctx.auth.staff!.id, "session.update", `session:${sid}`);
   return sessionDetail(ownSession(ctx, sid));

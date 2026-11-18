@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { route, bad, forbidden, notFound, HttpError, str, type Ctx } from "../router";
 import { all, get, run, tx, now, num, audit } from "../db";
 import { verifyPassword, issueToken, revokeToken, rateLimit, rateLimitReset, STAFF_COOKIE, STUDENT_COOKIE } from "../auth";
@@ -91,11 +92,20 @@ route("POST", "/student/join", (ctx) => {
   const pin = typeof b.pin === "string" ? b.pin.trim() : "";
   const pinKey = `pin:${ctx.ip}:${sid}`;
 
-  const existing = get("SELECT * FROM students WHERE session_id=? AND name_key=?", sid, key);
-  if (existing) {
-    // Same browser (valid cookie) resumes silently.
-    if (ctx.auth.studentId === num(existing.id)) return { student: studentState(num(existing.id)), resumed: true };
-    const grp = get("SELECT * FROM groups WHERE id=?", num(existing.group_id))!;
+  const existing = get("SELECT id FROM students WHERE session_id=? AND name_key=?", sid, key);
+  const current = ctx.auth.studentId ? get("SELECT * FROM students WHERE id=? AND session_id=?", ctx.auth.studentId, sid) : undefined;
+  if (current && nameKey(String(current.name), String(current.class), String(current.class_no)) === key) {
+    return { student: studentState(num(current.id)), resumed: true };
+  }
+  if (b.resume === true) {
+    const requestedGroup = Number(b.groupId);
+    const candidates = all("SELECT id,group_id,name,class,class_no FROM students WHERE session_id=?", sid)
+      .filter((row) => nameKey(String(row.name), String(row.class), String(row.class_no)) === key &&
+        (!Number.isInteger(requestedGroup) || requestedGroup <= 0 || num(row.group_id) === requestedGroup));
+    if (!candidates.length) throw notFound("No existing work matches those details. Turn off recovery to join as a new student.");
+    if (candidates.length > 1) throw new HttpError(409, "ambiguous_recovery", "More than one student matches. Choose your original group, or open your previous device if the details are identical.");
+    const student = candidates[0];
+    const grp = get("SELECT * FROM groups WHERE id=?", num(student.group_id))!;
     let ok = false;
     if (grp.pin) {
       if (!pin) throw new HttpError(403, "pin_required", "This name is already in the session. Enter your group PIN to continue on this device.");
@@ -103,20 +113,20 @@ route("POST", "/student/join", (ctx) => {
       if (pin !== String(grp.pin)) throw new HttpError(403, "wrong_pin", "That group PIN is not correct.");
       ok = true;
     } else {
-      const rr = get("SELECT * FROM recovery_requests WHERE student_id=? AND approved_at IS NOT NULL AND consumed_at IS NULL ORDER BY id DESC LIMIT 1", num(existing.id));
+      const rr = get("SELECT * FROM recovery_requests WHERE student_id=? AND approved_at IS NOT NULL AND consumed_at IS NULL ORDER BY id DESC LIMIT 1", num(student.id));
       if (rr) {
         run("UPDATE recovery_requests SET consumed_at=? WHERE id=?", now(), num(rr.id));
         ok = true;
       } else {
-        if (!get("SELECT 1 FROM recovery_requests WHERE student_id=? AND approved_at IS NULL", num(existing.id)))
-          run("INSERT INTO recovery_requests(student_id,created_at) VALUES(?,?)", num(existing.id), now());
+        if (!get("SELECT 1 FROM recovery_requests WHERE student_id=? AND approved_at IS NULL", num(student.id)))
+          run("INSERT INTO recovery_requests(student_id,created_at) VALUES(?,?)", num(student.id), now());
         throw new HttpError(403, "needs_approval", "This name is already in the session. Your teacher has been asked to approve this device. Try again in a moment.");
       }
     }
     if (ok) {
-      issueStudent(ctx, num(existing.id));
-      run("UPDATE students SET last_seen=? WHERE id=?", now(), num(existing.id));
-      return { student: studentState(num(existing.id)), resumed: true };
+      issueStudent(ctx, num(student.id));
+      run("UPDATE students SET last_seen=? WHERE id=?", now(), num(student.id));
+      return { student: studentState(num(student.id)), resumed: true };
     }
   }
 
@@ -139,7 +149,8 @@ route("POST", "/student/join", (ctx) => {
   const id = tx(() => {
     const n = num(get("SELECT COUNT(*) AS n FROM students WHERE group_id=?", num(g.id))!.n);
     if (g.seat_cap && n >= num(g.seat_cap)) throw forbidden("That group is full. Please choose another group.", "group_full");
-    return run("INSERT INTO students(session_id,group_id,name,class,class_no,name_key,last_seen,created_at) VALUES(?,?,?,?,?,?,?,?)", sid, num(g.id), name, cls, classNo, key, now(), now()).id;
+    const studentKey = existing ? `${key}|${randomUUID()}` : key;
+    return run("INSERT INTO students(session_id,group_id,name,class,class_no,name_key,last_seen,created_at) VALUES(?,?,?,?,?,?,?,?)", sid, num(g.id), name, cls, classNo, studentKey, now(), now()).id;
   });
   issueStudent(ctx, id);
   audit("student", id, "join", `session:${sid}`);

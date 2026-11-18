@@ -1,5 +1,5 @@
 import type { TableData } from "@/components/ui";
-import type { InstructionFile } from "@/lib/constants";
+import type { DesignTagHint, InstructionFile } from "@/lib/constants";
 
 export interface PartCfg {
   part: number;
@@ -17,6 +17,7 @@ export interface SessionDetail {
   anonymiseSharing: boolean;
   critiquePrompts: { key: string; label: string; enabled: boolean }[];
   entryTags: string[];
+  designTagHints: DesignTagHint[];
   aiCriteria: string;
   pedagogyNotes: string;
   source: { templateId: number; title: string; importedVersion: number; currentVersion: number | null } | null;

@@ -153,7 +153,7 @@ export function Header({ title, right, sub }: { title: string; sub?: string; rig
     <header className="border-b border-slate-200 bg-white">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-700 to-violet-600 text-lg text-white" aria-hidden>
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-800 text-lg text-white" aria-hidden>
             ⚗
           </span>
           <div>

@@ -85,6 +85,15 @@ async function main() {
   eq("teacher3 has no assigned templates", (await api(t3, "GET", "/teacher/assigned-templates")).json.templates.length, 0);
   const asg = t1assigned.find((a) => a.templateId === tplId);
   eq("teacher3 cannot import teacher1's assignment", (await api(t3, "POST", "/teacher/sessions", { title: "steal", assignmentId: asg.assignmentId })).status, 403);
+  const newTeacher = { name: "New test teacher", email: `new-teacher-${Date.now()}@example.test`, password: "Unique-test-staff-password-54" };
+  eq("classroom teachers cannot create staff accounts", (await api(t1, "POST", "/educator/teachers", newTeacher)).status, 403);
+  eq("educator cannot create account with short password", (await api(ed, "POST", "/educator/teachers", { ...newTeacher, password: "short" })).status, 400);
+  const createdTeacher = await api(ed, "POST", "/educator/teachers", newTeacher);
+  eq("educator creates a teacher", createdTeacher.status, 200);
+  check("new teacher is linked without exposing their password", !("password" in createdTeacher.json) && (await api(ed, "GET", "/educator/teachers")).json.teachers.some((t) => t.id === createdTeacher.json.id));
+  eq("duplicate teacher account is rejected", (await api(ed, "POST", "/educator/teachers", newTeacher)).status, 409);
+  const tNew = actor("new-teacher");
+  eq("new teacher can sign in", (await login(tNew, newTeacher.email, newTeacher.password)).json?.user?.role, "teacher");
 
   section("Sessions: import as copy, ownership");
   const sid = (await api(t1, "POST", "/teacher/sessions", { title: "Period 3 Investigation", assignmentId: asg.assignmentId })).json.id;
@@ -115,7 +124,7 @@ async function main() {
   eq("join lookup reports PIN needed", lookup.groups.find((g) => g.id === gC).hasPin, true);
 
   const s1 = actor("alice"), s2 = actor("bob"), s3 = actor("cara"), s4 = actor("dan"), s5 = actor("eve");
-  const join = (who, name, no, groupId, pin) => api(who, "POST", "/student/join", { code, name, class: "8A", classNo: no, groupId, pin });
+  const join = (who, name, no, groupId, pin, resume) => api(who, "POST", "/student/join", { code, name, class: "8A", classNo: no, groupId, pin, resume });
   eq("student joins group A", (await join(s1, "Alice Lee", "1", gA)).status, 200);
   eq("second student joins group A", (await join(s2, "Bob Tam", "2", gA)).status, 200);
   eq("student joins group B", (await join(s3, "Cara Ng", "3", gB)).status, 200);
@@ -166,20 +175,27 @@ async function main() {
   eq("same browser rejoin resumes", (await join(s1, "alice lee", "1", gA)).json.resumed, true);
   eq("cookie alone restores the student", (await api(s1, "GET", "/student/state")).json.student.name, "Alice Lee");
   const s1b = actor("alice-phone");
-  const r1 = await join(s1b, "Alice Lee", "1", gA);
+  const r1 = await join(s1b, "Alice Lee", "1", gA, undefined, true);
   eq("new device, unpinned group -> needs teacher approval", r1.json?.error, "needs_approval");
   eq("student with no token cannot read state", (await api(s1b, "GET", "/student/state")).status, 401);
   let st = (await api(t1, "GET", `/teacher/sessions/${sid}/status`)).json;
   eq("teacher sees the pending device request", st.recovery.length, 1);
   eq("teacher approves device", (await api(t1, "POST", `/teacher/sessions/${sid}/recovery/${st.recovery[0].id}/approve`)).status, 200);
-  eq("approved device can resume", (await join(s1b, "Alice Lee", "1", gA)).status, 200);
-  eq("approval is single-use", (await join(actor("alice-3"), "Alice Lee", "1", gA)).json?.error, "needs_approval");
+  eq("approved device can resume", (await join(s1b, "Alice Lee", "1", gA, undefined, true)).status, 200);
+  eq("approval is single-use", (await join(actor("alice-3"), "Alice Lee", "1", gA, undefined, true)).json?.error, "needs_approval");
   const s4b = actor("dan-phone");
-  eq("PIN group: device switch needs PIN", (await join(s4b, "Dan Yu", "4", gC)).json?.error, "pin_required");
-  eq("PIN group: device switch with PIN works", (await join(s4b, "Dan Yu", "4", gC, "abc12")).status, 200);
+  eq("PIN group: device switch needs PIN", (await join(s4b, "Dan Yu", "4", gC, undefined, true)).json?.error, "pin_required");
+  eq("PIN group: device switch with PIN works", (await join(s4b, "Dan Yu", "4", gC, "abc12", true)).status, 200);
 
   section("Part visibility & locking (server-enforced)");
   let state = (await api(s1, "GET", "/student/state")).json;
+  const designHint = [{ tag: "Independent variable", hint: "The factor you deliberately change." }];
+  eq("wrong teacher cannot configure design hints", (await api(t2, "PATCH", sessionBase, { designTagHints: designHint })).status, 404);
+  eq("design hint must belong to a configured tag", (await api(t1, "PATCH", sessionBase, { designTagHints: [{ tag: "Not a tag", hint: "Example" }] })).status, 400);
+  eq("teacher saves design hints", (await api(t1, "PATCH", sessionBase, { designTagHints: designHint })).status, 200);
+  state = (await api(s1, "GET", "/student/state")).json;
+  eq("students receive the hint for Part 1", state.parts[0].designTagHints[0].hint, designHint[0].hint);
+  check("design hints are not included outside Part 1", !state.parts[1].designTagHints);
   eq("student sees 3 parts", state.parts.length, 3);
   check("locked Part 2 carries no instructions/questions", state.parts[1].locked && !("instructions" in state.parts[1]) && !("questions" in state.parts[1]));
   eq("Part 2 entries -> 403 while locked", (await api(s1, "GET", "/student/entries?part=2")).status, 403);
@@ -324,6 +340,11 @@ async function main() {
   check("clearing a built-in label restores the default and keeps its checkbox", reset.label === defaultLabel && reset.enabled === false);
   await api(t1, "POST", `/teacher/sessions/${sid}/critiques/${critiqueId}/hide`, { hidden: true });
   eq("teacher can hide a critique", (await api(s1, "GET", "/student/class")).json.shares[0].critiques.length, 0);
+  const addedPrompt = { key: "teacher-prompt-1", label: "Check whether the repeat trials agree", enabled: true };
+  const livePrompts = (await api(t1, "GET", sessionPath)).json.critiquePrompts;
+  eq("teacher can create a new critique prompt", (await api(t1, "PATCH", sessionPath, { critiquePrompts: [...livePrompts, addedPrompt] })).status, 200);
+  eq("students can see the new prompt", findPrompt((await api(s3, "GET", "/student/class")).json.prompts, addedPrompt.key)?.label, addedPrompt.label);
+  eq("students can post under the new prompt", (await api(s3, "POST", "/student/critiques", { shareId: cls.shares[0].shareId, promptKey: addedPrompt.key, body: "How consistent were the trials?" })).status, 200);
 
   section("Projector view shows only published content");
   const unshared = (await api(s1, "POST", "/student/entries", { part: 2, body: "PRIVATE-DRAFT-TEXT" })).json.entry;
@@ -343,6 +364,13 @@ async function main() {
   check("JSON export has stages, questions and entries", js.stages.length === 3 && js.stages[0].guidingQuestions[0] === "Custom Q1" && js.entries.length >= 4);
   eq("other teacher cannot export", (await api(t2, "GET", `/teacher/sessions/${sid}/export?format=json`)).status, 404);
   eq("educator cannot export", (await api(ed, "GET", `/teacher/sessions/${sid}/export?format=json`)).status, 403);
+  const duplicate = actor("same-details");
+  const originalStudent = (await api(s1, "GET", "/student/state")).json.student.id;
+  const duplicateJoin = await join(duplicate, "Alice Lee", "1", gB);
+  check("same details can join without approval as a separate student", duplicateJoin.status === 200 && !duplicateJoin.json.resumed && duplicateJoin.json.student.id !== originalStudent);
+  eq("the duplicate can rejoin on their own browser", (await join(duplicate, "Alice Lee", "1", gB)).json.student?.id, duplicateJoin.json.student.id);
+  eq("the duplicate cannot edit the original student's work", (await api(duplicate, "PATCH", `/student/entries/${e1.id}`, { body: "wrong student" })).status, 404);
+  eq("recovery refuses ambiguous identical details without a group", (await join(actor("ambiguous"), "Alice Lee", "1", "auto", undefined, true)).json?.error, "ambiguous_recovery");
 
   section("Archive & delete");
   eq("cannot delete an active session", (await api(t1, "DELETE", `/teacher/sessions/${sid}`, { confirmTitle: "Period 3 Investigation" })).status, 403);

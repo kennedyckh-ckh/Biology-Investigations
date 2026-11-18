@@ -9,7 +9,7 @@ import {
   onlineEditors,
 } from "../authz";
 import { entriesWhere, validateTag, validateTable, saveImage, deleteImageFile, readImage } from "../entries";
-import { entryTagsFor, questionsFor } from "../sessions";
+import { designHintsFor, entryTagsFor, questionsFor } from "../sessions";
 import { publishedShares, publishedAi, critiquePromptsOf, reactionsFor } from "../sharing";
 import { attachmentInfo, attachmentRow, downloadInstructionFile } from "../instruction-files";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS } from "../constants";
@@ -18,6 +18,7 @@ route("GET", "/student/state", (ctx) => {
   const sc = requireStudent(ctx, { allowArchived: true });
   const sid = num(sc.session.id);
   const gid = num(sc.group.id);
+  const entryTags = entryTagsFor(sid);
   const parts = [1, 2, 3]
     .map((part) => {
       const p = get("SELECT * FROM session_parts WHERE session_id=? AND part=?", sid, part)!;
@@ -31,6 +32,7 @@ route("GET", "/student/state", (ctx) => {
         webLink: String(p.web_link),
         attachment: attachmentInfo(sid, part),
         questions: questionsFor(sid, part),
+        ...(part === 1 ? { designTagHints: designHintsFor(sid).filter(({ tag }) => entryTags.includes(tag)) } : {}),
         submission: submissionInfo(gid, part),
         entryCount: num(get("SELECT COUNT(*) AS n FROM entries WHERE group_id=? AND part=? AND deleted_at IS NULL", gid, part)!.n),
       };
@@ -49,7 +51,7 @@ route("GET", "/student/state", (ctx) => {
     session: { title: sc.session.title, archived: sc.session.status !== "active" },
     group: { id: gid, name: sc.group.name, members },
     parts,
-    entryTags: entryTagsFor(sid),
+    entryTags,
     serverTime: now(),
   };
 });
