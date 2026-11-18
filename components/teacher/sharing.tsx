@@ -88,7 +88,7 @@ export function Sharing({ session, onSaved }: { session: SessionDetail; onSaved:
               </div>
             </div>
             <EntryBody body={s.entry.body} hasImage={s.entry.hasImage} entryId={s.entry.id} table={s.entry.table} />
-            <p className="text-xs text-slate-600">Likes: {s.reactions.like} · Hearts: {s.reactions.heart}</p>
+            <p className="text-xs text-slate-600">Stars: {s.reactions.like} · Hearts: {s.reactions.heart}</p>
             {s.critiques.length > 0 && (
               <div className="border-t border-slate-100 pt-3">
                 <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Peer critiques ({s.critiques.length})</div>

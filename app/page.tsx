@@ -48,29 +48,18 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-slate-50 text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
-      {/* Subtle scientific dot-grid & ambient gradient background */}
-      <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:24px_24px] opacity-45"
-        aria-hidden
-      />
-      <div
-        className="pointer-events-none absolute -top-32 left-1/2 h-[30rem] w-[56rem] -translate-x-1/2 rounded-full bg-gradient-to-tr from-blue-200/40 via-indigo-200/35 to-teal-100/40 blur-3xl"
-        aria-hidden
-      />
-
+    <main className="relative min-h-screen overflow-hidden border-t-4 border-blue-800 bg-slate-50 text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
       <div className="relative mx-auto flex min-h-screen max-w-6xl flex-col justify-center px-5 py-10 sm:px-8 lg:py-16">
         <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-14">
           {/* Left Column: Pedagogical Framing & Active Session Resume */}
           <div className="flex flex-col justify-center lg:col-span-7">
-            <div className="mb-6 inline-flex w-fit items-center gap-2.5 rounded-full border border-indigo-200/80 bg-white/80 px-3.5 py-1.5 text-xs font-semibold tracking-wide text-indigo-800 shadow-xs backdrop-blur-xs">
-              <span className="flex h-2 w-2 rounded-full bg-indigo-600" />
+            <div className="mb-6 inline-flex w-fit items-center border-l-2 border-violet-600 pl-3 text-xs font-semibold tracking-widest text-slate-600">
               COLLABORATIVE SCIENCE INQUIRY PLATFORM
             </div>
 
             <div className="flex items-center gap-4">
               <div
-                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/25 ring-1 ring-white/20"
+                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-blue-800 text-white"
                 aria-hidden
               >
                 <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -94,11 +83,11 @@ export default function Home() {
                 <li key={stage.title} className="group relative flex items-start gap-4">
                   {i < INQUIRY_STAGES.length - 1 && (
                     <span
-                      className="absolute top-9 left-4 h-7 w-px bg-gradient-to-b from-indigo-300 to-slate-200"
+                      className="absolute top-9 left-4 h-7 w-px bg-slate-300"
                       aria-hidden
                     />
                   )}
-                  <span className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-indigo-200 bg-white text-xs font-bold text-indigo-700 shadow-xs transition group-hover:border-indigo-500 group-hover:bg-indigo-600 group-hover:text-white">
+                  <span className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-xs font-bold text-blue-800">
                     {i + 1}
                   </span>
                   <div className="pt-0.5">
@@ -140,10 +129,10 @@ export default function Home() {
 
           {/* Right Column: Elevated Join / Sign-In Card */}
           <div className="lg:col-span-5">
-            <div className="overflow-hidden rounded-3xl border border-slate-200/90 bg-white/95 p-6 shadow-xl shadow-slate-900/5 backdrop-blur-md sm:p-8">
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
               {/* Role Switcher Tabs */}
               <div
-                className="mb-7 grid grid-cols-2 gap-1 rounded-2xl bg-slate-100/90 p-1.5 text-sm font-semibold ring-1 ring-inset ring-slate-200/60"
+                className="mb-7 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1.5 text-sm font-semibold ring-1 ring-inset ring-slate-200"
                 role="tablist"
               >
                 {(["student", "staff"] as const).map((m) => {
@@ -241,6 +230,7 @@ function StudentJoin() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [waiting, setWaiting] = useState(false);
+  const [resume, setResume] = useState(false);
 
   async function findSession(e: React.FormEvent) {
     e.preventDefault();
@@ -268,6 +258,7 @@ function StudentJoin() {
         classNo,
         groupId: groupId === "auto" ? "auto" : Number(groupId),
         pin,
+        resume,
       });
       router.push("/student");
     } catch (x) {
@@ -318,7 +309,7 @@ function StudentJoin() {
         )}
 
         <button
-          className="btn-primary h-11 w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 font-semibold text-white shadow-md shadow-indigo-500/20 transition hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
+          className="btn-primary h-11 w-full"
           disabled={busy || code.trim().length < 4}
         >
           {busy ? "Checking session…" : "Continue →"}
@@ -439,15 +430,16 @@ function StudentJoin() {
       )}
 
       <button
-        className="btn-primary h-11 w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 font-semibold text-white shadow-md shadow-indigo-500/20 transition hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
+        className="btn-primary h-11 w-full"
         disabled={busy && !waiting}
       >
         {busy ? "Joining session…" : "Join session"}
       </button>
 
-      <p className="text-center text-xs leading-relaxed text-slate-500">
-        Rejoining? Enter the exact same name, class, and class number to resume your group’s work.
-      </p>
+      <label className="flex items-start gap-2 text-xs leading-relaxed text-slate-600">
+        <input className="mt-0.5" type="checkbox" checked={resume} onChange={(e) => { setResume(e.target.checked); setWaiting(false); setErr(""); }} />
+        <span>Recover my previous work on a new device. Leave this unchecked to join as a new student, even if someone has the same name.</span>
+      </label>
     </form>
   );
 }
@@ -519,7 +511,7 @@ function StaffLogin() {
       )}
 
       <button
-        className="btn-primary h-11 w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 font-semibold text-white shadow-md shadow-indigo-500/20 transition hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
+        className="btn-primary h-11 w-full"
         disabled={busy}
       >
         {busy ? "Signing in…" : "Sign in"}

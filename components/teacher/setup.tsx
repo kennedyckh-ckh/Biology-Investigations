@@ -36,6 +36,11 @@ function SessionSettings({ session, onSaved, disabled }: { session: SessionDetai
   const [prompts, setPrompts] = useState(session.critiquePrompts);
   const [tags, setTags] = useState(session.entryTags.join("\n"));
   const [tagsEdited, setTagsEdited] = useState(false);
+  const [hints, setHints] = useState(session.designTagHints);
+  const [hintsEdited, setHintsEdited] = useState(false);
+  const [hintTag, setHintTag] = useState("");
+  const tagList = [...new Set(tags.split(/\r?\n/).map((tag) => tag.trim()).filter(Boolean))];
+  const activeHintTag = tagList.includes(hintTag) ? hintTag : tagList[0] ?? "";
   const [busy, setBusy] = useState(false);
   function updatePrompt(key: string, update: { label?: string; enabled?: boolean }) {
     setPrompts((ps) => ps.map((p) => p.key === key ? { ...p, ...update } : p));
@@ -46,10 +51,13 @@ function SessionSettings({ session, onSaved, disabled }: { session: SessionDetai
       const saved = await api<SessionDetail>("PATCH", `/teacher/sessions/${session.id}`, {
         title, aiCriteria: criteria, critiquePrompts: prompts,
         ...(tagsEdited ? { entryTags: tags.split(/\r?\n/).map((tag) => tag.trim()).filter(Boolean) } : {}),
+        ...(tagsEdited || hintsEdited ? { designTagHints: hints.filter(({ tag }) => tagList.includes(tag)) } : {}),
       });
       setPrompts(saved.critiquePrompts);
       setTags(saved.entryTags.join("\n"));
       setTagsEdited(false);
+      setHints(saved.designTagHints);
+      setHintsEdited(false);
       toast("Session settings saved");
       onSaved();
     } catch (e) {
@@ -67,7 +75,7 @@ function SessionSettings({ session, onSaved, disabled }: { session: SessionDetai
       <fieldset disabled={busy || disabled} aria-describedby="critique-prompts-help">
         <legend className="label">Peer critique prompts students can use on shared responses</legend>
         <p id="critique-prompts-help" className="mb-2 text-xs text-slate-500">
-          Edit the wording for this session and tick the prompts students can use. Clear a built-in label to restore its original wording when you save.
+          Rename or add prompts for this session. Untick a prompt to hide it from the student menu without removing previous critiques. Clear a built-in label to restore its original wording.
         </p>
         <div className="grid gap-2 sm:grid-cols-2">
           {prompts.map((p, i) => (
@@ -86,6 +94,14 @@ function SessionSettings({ session, onSaved, disabled }: { session: SessionDetai
             </div>
           ))}
         </div>
+        <button type="button" className="btn-ghost btn-sm mt-2" disabled={prompts.length >= LIMITS.critiquePromptCount} onClick={() => {
+          setPrompts((current) => [...current, { key: crypto.randomUUID(), label: "", enabled: true }]);
+        }}>Add critique prompt</button>
+        {prompts.some((p) => !session.critiquePrompts.some((saved) => saved.key === p.key)) && (
+          <button type="button" className="btn-ghost btn-sm mt-2 ml-2" onClick={() => setPrompts((current) => current.filter((p) => session.critiquePrompts.some((saved) => saved.key === p.key)))}>
+            Discard new prompts
+          </button>
+        )}
       </fieldset>
       <details className="rounded-lg border border-slate-200 p-3">
         <summary className="cursor-pointer text-sm font-semibold">Customise entry tags</summary>
@@ -96,6 +112,32 @@ function SessionSettings({ session, onSaved, disabled }: { session: SessionDetai
           <button type="button" className="btn-ghost btn-sm" onClick={() => { setTags(TAGS.join("\n")); setTagsEdited(true); }} disabled={busy || disabled}>
             Restore default tags
           </button>
+        </div>
+      </details>
+      <details className="rounded-lg border border-slate-200 p-3">
+        <summary className="cursor-pointer text-sm font-semibold">Design tag hints</summary>
+        <div className="mt-3 space-y-3">
+          <p className="text-sm text-slate-600">Write a short definition, example or question. Students can open it in Part 1.</p>
+          {activeHintTag ? (
+            <>
+              <Field label="Choose a tag">
+                <select className="input max-w-sm" value={activeHintTag} onChange={(e) => setHintTag(e.target.value)}>
+                  {tagList.map((tag) => <option key={tag}>{tag}</option>)}
+                </select>
+              </Field>
+              <Field label="Hint for the selected tag" hint="Leave this blank if you don’t want a hint for this tag.">
+                <textarea className="input min-h-24" disabled={busy || disabled} maxLength={LIMITS.designHintMax}
+                  value={hints.find((h) => h.tag === activeHintTag)?.hint ?? ""}
+                  placeholder="Example: The independent variable is what you deliberately change."
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setHints((current) => [...current.filter(({ tag }) => tag !== activeHintTag), { tag: activeHintTag, hint: text }]);
+                    setHintsEdited(true);
+                  }} />
+              </Field>
+              <p className="text-xs text-slate-500">{hints.filter(({ tag, hint }) => tagList.includes(tag) && hint.trim()).length} tags with hints.</p>
+            </>
+          ) : <p className="text-sm text-slate-600">Add an entry tag before writing a hint.</p>}
         </div>
       </details>
       <Field label="Criteria for AI analysis" hint="What should the AI look for? It always prioritises divergent findings, uncontrolled variables, evidence-to-claim gaps and misconceptions.">

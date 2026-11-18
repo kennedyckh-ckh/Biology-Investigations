@@ -33,9 +33,13 @@ The four `INITIAL_…` values are only used to create the first two staff accoun
 
 ## Session setup and peer review
 
+- Sign in as **Teacher Educator → Teachers you support → Add teacher** to provision another classroom teacher with their own email and private password. The teacher will be linked to that educator, who can assign them templates but cannot view their live sessions. No new Render environment variables are needed.
+- Students can join as new without approval, even if their details match another student's. They can choose **Recover my previous work on a new device** instead; that separate action still verifies a group PIN or requires teacher approval.
+
 - In **Setup**, upload, replace or remove the **Instruction file** in each part. Students can download it once that part is open. Uploaded files are downloads, not embedded previews; upload only files suitable for your class.
 - In **Setup → Session settings → Customise entry tags**, edit the list one tag per line, then click **Save settings**. Defaults apply until customised. Existing entries retain their original tags.
-- In **Class board**, students can Like or Heart a peer's shared response. Selecting the same reaction again removes it. Only aggregate counts and the student's own selection are shown, not the names of students who reacted.
+- In **Setup → Session settings**, add or rename peer critique prompts and add **Design tag hints** for any configured tag. Part 1 students can open the hint panel and select a tag to read its definition or example.
+- In **Class board**, students can Star or Heart a peer's shared response. Selecting the same reaction again removes it. Only aggregate counts and the student's own selection are shown, not the names of students who reacted.
 
 ## Local test accounts (seeded on first start)
 
@@ -96,7 +100,7 @@ Prompt injection can only ever be *mitigated* by this design, never fully ruled 
 
 ## Known limitations (be aware before classroom use)
 
-* **Student identity is classroom-grade, not account-grade.** Anyone with the join code who types a classmate's name/class/number *from a new device* needs the **group PIN** or a **teacher approval** to take over that identity, but there are no passwords. Use group PINs for sensitive classes.
+* **Student identity is classroom-grade, not account-grade.** New joins create separate identities, and explicit recovery of existing work on a new device requires the **group PIN** or **teacher approval**. Students in the same group are still collaborators. Use group PINs for sensitive classes.
 * Login and PIN throttling is **in memory** and per process: it resets on restart, and a locked-out email is locked for 5 minutes. Put a reverse proxy / WAF in front for real deployments. The client IP is read from `X-Forwarded-For`, which only a trusted proxy should set.
 * Set `COOKIE_SECURE=1` when serving over HTTPS.
 * SQLite is a single file: fine for one class or school; take regular backups of `./data`.

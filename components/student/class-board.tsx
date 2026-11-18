@@ -5,6 +5,16 @@ import { EntryBody, TagBadge, Spinner, ErrorBox, Empty, useToast, type TableData
 import { AiView, type AiContent } from "@/components/ai-view";
 import type { PeerReaction } from "@/lib/constants";
 
+function ReactionIcon({ reaction, filled }: { reaction: PeerReaction; filled?: boolean }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+      {reaction === "like"
+        ? <path d="m12 3 2.78 5.63 6.22.9-4.5 4.38 1.06 6.19L12 17.18l-5.56 2.92 1.06-6.19L3 9.53l6.22-.9L12 3Z" />
+        : <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78Z" />}
+    </svg>
+  );
+}
+
 interface ClassResp {
   anonymised: boolean;
   shares: {
@@ -131,13 +141,18 @@ function ShareCard({ s, prompts, onChanged, onReaction }: {
       {s.canReact ? (
         <div className="flex flex-wrap gap-2" role="group" aria-label="Reactions">
           {(["like", "heart"] as const).map((reaction) => (
-            <button key={reaction} type="button" className={`btn-ghost min-h-11 ${s.reactions.mine === reaction ? "bg-violet-100 text-violet-900" : ""}`}
-              aria-pressed={s.reactions.mine === reaction} disabled={reacting} onClick={() => react(reaction)}>
-              {reaction === "like" ? "Like" : "Heart"} <span className="tabular-nums">{s.reactions[reaction]}</span>
+            <button key={reaction} type="button" className={`btn-ghost min-h-11 ${s.reactions.mine === reaction ? (reaction === "like" ? "bg-amber-50 text-amber-800" : "bg-rose-50 text-rose-700") : ""}`}
+              aria-label={`${reaction === "like" ? "Star" : "Heart"} ${s.reactions[reaction]}`} aria-pressed={s.reactions.mine === reaction} disabled={reacting} onClick={() => react(reaction)}>
+              <ReactionIcon reaction={reaction} filled={s.reactions.mine === reaction} /> <span className="tabular-nums">{s.reactions[reaction]}</span>
             </button>
           ))}
         </div>
-      ) : <p className="text-xs text-slate-600">Likes: {s.reactions.like} · Hearts: {s.reactions.heart}</p>}
+      ) : (
+        <p className="flex gap-4 text-sm text-slate-600">
+          <span className="inline-flex items-center gap-1" aria-label={`${s.reactions.like} stars`}><ReactionIcon reaction="like" />{s.reactions.like}</span>
+          <span className="inline-flex items-center gap-1" aria-label={`${s.reactions.heart} hearts`}><ReactionIcon reaction="heart" />{s.reactions.heart}</span>
+        </p>
+      )}
       <div className="border-t border-slate-100 pt-3">
         {s.critiques.length > 0 && (
           <ul className="mb-3 space-y-2">

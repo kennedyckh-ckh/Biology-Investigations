@@ -1,6 +1,8 @@
-import { route, bad, forbidden, notFound, str, int, safeLink } from "../router";
+import { route, bad, forbidden, notFound, str, int, safeLink, HttpError } from "../router";
 import { all, get, run, tx, now, num, audit } from "../db";
 import { requireEducator } from "../authz";
+import { hashPassword } from "../auth";
+import { isDemoPassword } from "../seed";
 
 function ownTemplate(ctx: Parameters<typeof requireEducator>[0], rawId: string | number) {
   const u = requireEducator(ctx);
@@ -39,6 +41,24 @@ function templateDetail(t: Record<string, unknown>) {
 route("GET", "/educator/teachers", (ctx) => {
   const u = requireEducator(ctx);
   return { teachers: all("SELECT u.id,u.name,u.email FROM educator_teacher et JOIN users u ON u.id=et.teacher_id WHERE et.educator_id=? ORDER BY u.name", u.id).map((t) => ({ id: num(t.id), name: t.name, email: t.email })) };
+});
+
+route("POST", "/educator/teachers", (ctx) => {
+  const educator = requireEducator(ctx);
+  const name = str(ctx.body?.name, 100, "Teacher name");
+  const email = str(ctx.body?.email, 200, "Teacher email").toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw bad("Enter a valid email address.");
+  const password = str(ctx.body?.password, 200, "Initial password", { min: 16 });
+  if (isDemoPassword(password)) throw bad("Choose a private password, not a demo password.");
+  return tx(() => {
+    if (get("SELECT 1 FROM users WHERE email=?", email)) {
+      throw new HttpError(409, "email_in_use", "An account already uses that email address.");
+    }
+    const id = run("INSERT INTO users(role,name,email,password_hash,created_at) VALUES('teacher',?,?,?,?)", name, email, hashPassword(password), now()).id;
+    run("INSERT INTO educator_teacher(educator_id,teacher_id) VALUES(?,?)", educator.id, id);
+    audit("staff", educator.id, "teacher.create", `teacher:${id}`);
+    return { id, name, email };
+  });
 });
 
 route("GET", "/educator/templates", (ctx) => {

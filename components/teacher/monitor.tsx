@@ -63,8 +63,8 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
   return (
     <div className="space-y-8">
       <section className="grid gap-4 md:grid-cols-[auto_1fr]">
-        <div className="card flex flex-col items-center justify-center bg-gradient-to-br from-blue-700 to-violet-700 text-white">
-          <div className="text-xs font-semibold uppercase tracking-widest text-blue-100">Students join with</div>
+        <div className="card flex flex-col items-center justify-center border-blue-200 bg-blue-50 text-blue-900">
+          <div className="text-xs font-semibold uppercase tracking-widest text-blue-700">Students join with</div>
           <div className="my-1 font-mono text-5xl font-extrabold tracking-[0.3em]" aria-label={`Join code ${session.joinCode.split("").join(" ")}`}>{session.joinCode}</div>
           <button className="btn-ghost btn-sm mt-1" onClick={() => { navigator.clipboard?.writeText(session.joinCode); toast("Code copied"); }}>
             Copy code

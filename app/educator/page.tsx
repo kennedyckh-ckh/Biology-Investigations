@@ -25,6 +25,26 @@ function Dashboard() {
   const teachers = usePoll<{ teachers: { id: number; name: string; email: string }[] }>("/educator/teachers", 0);
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
+  const [addTeacher, setAddTeacher] = useState(false);
+  const [teacher, setTeacher] = useState({ name: "", email: "", password: "" });
+  const [adding, setAdding] = useState(false);
+  const [teacherError, setTeacherError] = useState("");
+  async function createTeacher(e: React.FormEvent) {
+    e.preventDefault();
+    setAdding(true);
+    setTeacherError("");
+    try {
+      await api("POST", "/educator/teachers", teacher);
+      setTeacher({ name: "", email: "", password: "" });
+      setAddTeacher(false);
+      teachers.refresh();
+      toast("Teacher account created");
+    } catch (error) {
+      setTeacherError((error as ApiError).message);
+    } finally {
+      setAdding(false);
+    }
+  }
   async function create() {
     try {
       const r = await api<{ id: number }>("POST", "/educator/templates", { title });
@@ -80,7 +100,10 @@ function Dashboard() {
         </div>
       </section>
       <section>
-        <h2 className="mb-2 text-lg font-bold">Teachers you support</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-bold">Teachers you support</h2>
+          <button className="btn-primary" onClick={() => { setTeacher({ name: "", email: "", password: "" }); setTeacherError(""); setAddTeacher(true); }}>Add teacher</button>
+        </div>
         {teachers.data?.teachers.length ? (
           <ul className="flex flex-wrap gap-2">
             {teachers.data.teachers.map((t) => (
@@ -93,6 +116,22 @@ function Dashboard() {
           <p className="text-sm text-slate-500">No teachers have been assigned to you yet.</p>
         )}
       </section>
+      {addTeacher && (
+        <Modal title="Add teacher" onClose={() => { if (!adding) { setAddTeacher(false); setTeacher({ name: "", email: "", password: "" }); } }}>
+          <form className="space-y-4" onSubmit={createTeacher}>
+            <Field label="Teacher name"><input className="input" required maxLength={100} value={teacher.name} onChange={(e) => setTeacher({ ...teacher, name: e.target.value })} /></Field>
+            <Field label="Teacher email"><input className="input" type="email" required maxLength={200} value={teacher.email} onChange={(e) => setTeacher({ ...teacher, email: e.target.value })} /></Field>
+            <Field label="Initial password" hint="At least 16 characters. Share the password with this teacher privately.">
+              <input className="input" type="password" autoComplete="new-password" required minLength={16} maxLength={200} value={teacher.password} onChange={(e) => setTeacher({ ...teacher, password: e.target.value })} />
+            </Field>
+            {teacherError && <p className="text-sm text-rose-700" role="alert">{teacherError}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-ghost" disabled={adding} onClick={() => { setAddTeacher(false); setTeacher({ name: "", email: "", password: "" }); }}>Cancel</button>
+              <button className="btn-primary" disabled={adding}>{adding ? "Creating…" : "Create teacher"}</button>
+            </div>
+          </form>
+        </Modal>
+      )}
       {creating && (
         <Modal title="New template" onClose={() => setCreating(false)}>
           <Field label="Session title for this investigation">

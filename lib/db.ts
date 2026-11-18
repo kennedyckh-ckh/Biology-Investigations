@@ -109,6 +109,10 @@ CREATE TABLE IF NOT EXISTS session_entry_tags(
   session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
   tags_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS design_tag_hints(
+  session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  hints_json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS instruction_attachments(
   session_id INTEGER NOT NULL,
   part INTEGER NOT NULL,

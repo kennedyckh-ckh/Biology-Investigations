@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { all, get, run, tx, now, num, type Row } from "./db";
-import { DEFAULT_CRITIQUE_PROMPTS, TAGS } from "./constants";
+import { DEFAULT_CRITIQUE_PROMPTS, TAGS, type DesignTagHint } from "./constants";
 import { attachmentInfo } from "./instruction-files";
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -74,6 +74,11 @@ export function partConfig(sessionId: number) {
 export function entryTagsFor(sessionId: number): readonly string[] {
   const saved = get("SELECT tags_json FROM session_entry_tags WHERE session_id=?", sessionId);
   return saved ? JSON.parse(String(saved.tags_json)) as string[] : TAGS;
+}
+
+export function designHintsFor(sessionId: number): DesignTagHint[] {
+  const row = get("SELECT hints_json FROM design_tag_hints WHERE session_id=?", sessionId);
+  return row ? JSON.parse(String(row.hints_json)) as DesignTagHint[] : [];
 }
 
 export function setQuestions(sessionId: number, part: number, questions: string[]) {
