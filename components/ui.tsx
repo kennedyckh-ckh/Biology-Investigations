@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, createContext, useContext, useCallback, type ReactNode } from "react";
+import { BrandLogo } from "@/components/brand-logo";
 
 export function Spinner({ label = "Loading…" }: { label?: string }) {
   return (
@@ -150,13 +151,11 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 
 export function Header({ title, right, sub }: { title: string; sub?: string; right?: ReactNode }) {
   return (
-    <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-800 text-lg text-white" aria-hidden>
-            ⚗
-          </span>
-          <div>
+    <header className="border-t-2 border-t-blue-900 border-b border-b-slate-200 bg-white">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-5 gap-y-2 px-4 py-2.5 sm:px-6">
+        <div className="flex min-w-0 max-w-full items-center gap-2.5 sm:gap-4">
+          <BrandLogo className="w-32 shrink-0 sm:w-40" />
+          <div className="min-w-0 border-l border-slate-200 py-0.5 pl-2.5 break-words sm:pl-4">
             <div className="text-sm font-bold leading-tight text-slate-900">{title}</div>
             {sub && <div className="text-xs text-slate-500">{sub}</div>}
           </div>

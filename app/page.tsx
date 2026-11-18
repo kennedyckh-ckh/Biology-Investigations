@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/client/api";
 import { Field } from "@/components/ui";
+import { BrandLogo } from "@/components/brand-logo";
 
 interface Me {
   staff: { id: number; role: "teacher" | "educator"; name: string } | null;
@@ -48,92 +49,28 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="relative min-h-screen overflow-hidden border-t-4 border-blue-800 bg-slate-50 text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
-      <div className="relative mx-auto flex min-h-screen max-w-6xl flex-col justify-center px-5 py-10 sm:px-8 lg:py-16">
-        <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-14">
-          {/* Left Column: Pedagogical Framing & Active Session Resume */}
-          <div className="flex flex-col justify-center lg:col-span-7">
-            <div className="mb-6 inline-flex w-fit items-center border-l-2 border-violet-600 pl-3 text-xs font-semibold tracking-widest text-slate-600">
-              COLLABORATIVE SCIENCE INQUIRY PLATFORM
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div
-                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-blue-800 text-white"
-                aria-hidden
-              >
-                <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 3h6" />
-                  <path d="M10 9h4" />
-                  <path d="M10 3v6l-4.5 8.5A2 2 0 0 0 7.26 20.5h9.48a2 2 0 0 0 1.76-3L14 9V3" />
-                </svg>
-              </div>
-              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl lg:text-[2.65rem] lg:leading-[1.15]">
-                Scientific Investigations
-              </h1>
-            </div>
-
-            <p className="mt-4 max-w-xl text-base leading-relaxed text-slate-600 sm:text-lg">
-              Design an investigation, carry it out, and reflect on what really happened—building evidence-based scientific reasoning together with your group.
+    <>
+      <header className="border-t-4 border-t-blue-900 border-b border-b-slate-200 bg-white">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-5 px-5 py-3 sm:px-8">
+          <BrandLogo className="w-48 sm:w-58" priority />
+          <p className="hidden border-l border-slate-200 pl-5 text-xs font-semibold tracking-wide text-slate-600 sm:block">Collaborative science inquiry platform</p>
+        </div>
+      </header>
+      <main className="mx-auto grid max-w-6xl items-start gap-7 px-5 pt-8 pb-12 sm:px-8 sm:pt-12 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.9fr)] lg:gap-x-20 lg:gap-y-7 lg:pt-18">
+          <div className="lg:col-start-1 lg:row-start-1">
+            <p className="flex items-center gap-2.5 text-xs font-semibold tracking-[0.15em] text-violet-700 uppercase">
+              <span className="h-px w-6 bg-violet-600" aria-hidden="true" /> Classroom workspace
             </p>
-
-            {/* Connected 3-Stage Inquiry Roadmap */}
-            <ol className="mt-8 space-y-4">
-              {INQUIRY_STAGES.map((stage, i) => (
-                <li key={stage.title} className="group relative flex items-start gap-4">
-                  {i < INQUIRY_STAGES.length - 1 && (
-                    <span
-                      className="absolute top-9 left-4 h-7 w-px bg-slate-300"
-                      aria-hidden
-                    />
-                  )}
-                  <span className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-xs font-bold text-blue-800">
-                    {i + 1}
-                  </span>
-                  <div className="pt-0.5">
-                    <p className="text-sm font-bold text-slate-800">{stage.title}</p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-slate-500 sm:text-sm">
-                      {stage.desc}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-
-            {/* Resume Active Sessions */}
-            {(me?.student?.sessionStatus === "active" || me?.staff) && (
-              <div className="mt-8 space-y-3">
-                {me?.student && me.student.sessionStatus === "active" && (
-                  <ContinueCard
-                    label={`Continue as ${me.student.name}`}
-                    sub={me.student.sessionTitle}
-                    badge="Active Student Session"
-                    href="/student"
-                  />
-                )}
-                {me?.staff && (
-                  <ContinueCard
-                    label={`Continue as ${me.staff.name}`}
-                    sub={
-                      me.staff.role === "teacher"
-                        ? "Teacher Live Monitor & Session Dashboard"
-                        : "Teacher Educator Curriculum & Template Studio"
-                    }
-                    badge="Signed In"
-                    href={me.staff.role === "teacher" ? "/teacher" : "/educator"}
-                  />
-                )}
-              </div>
-            )}
+            <h1 className="mt-3 text-[2.1rem] leading-[1.12] font-bold tracking-tight text-blue-950 sm:text-5xl">Scientific Investigations</h1>
+            <p className="mt-3 max-w-md text-sm leading-relaxed text-slate-600 sm:mt-4 sm:text-base">
+              Plan an investigation, collect evidence, and discuss what your findings support. Work together at each stage.
+            </p>
           </div>
-
-          {/* Right Column: Elevated Join / Sign-In Card */}
-          <div className="lg:col-span-5">
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-              {/* Role Switcher Tabs */}
+          <section aria-label="Platform access" className="w-full overflow-hidden rounded-xl border border-slate-200 bg-white px-5 pt-5 pb-6 shadow-sm sm:px-7 sm:pt-6 sm:pb-7 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+              <p className="mb-3 text-xs font-semibold tracking-[0.15em] text-slate-600 uppercase">Platform access</p>
               <div
-                className="mb-7 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1.5 text-sm font-semibold ring-1 ring-inset ring-slate-200"
-                role="tablist"
+                className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 text-sm font-semibold"
+                role="tablist" aria-label="Choose your role"
               >
                 {(["student", "staff"] as const).map((m) => {
                   const active = mode === m;
@@ -142,17 +79,27 @@ export default function Home() {
                       key={m}
                       type="button"
                       role="tab"
+                      id={`access-tab-${m}`}
                       aria-selected={active}
+                      aria-controls={`access-panel-${m}`}
+                      tabIndex={active ? 0 : -1}
                       onClick={() => setMode(m)}
-                      className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 transition-all duration-150 ${
+                      onKeyDown={(e) => {
+                        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+                        e.preventDefault();
+                        const next = e.key === "Home" ? "student" : e.key === "End" ? "staff" : mode === "student" ? "staff" : "student";
+                        setMode(next);
+                        document.getElementById(`access-tab-${next}`)?.focus();
+                      }}
+                      className={`flex min-h-11 items-center justify-center gap-2 rounded-md px-2 py-2 transition focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none ${
                         active
-                          ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/70"
-                          : "text-slate-500 hover:text-slate-800"
+                          ? "bg-blue-800 text-white"
+                          : "text-slate-700 hover:bg-white"
                       }`}
                     >
                       {m === "student" ? (
                         <>
-                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <svg className="hidden h-4 w-4 shrink-0 min-[420px]:block" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                             <circle cx="9" cy="7" r="4" />
                             <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
@@ -162,7 +109,7 @@ export default function Home() {
                         </>
                       ) : (
                         <>
-                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <svg className="hidden h-4 w-4 shrink-0 min-[420px]:block" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <rect x="3" y="4" width="18" height="12" rx="2" />
                             <path d="M2 20h20" />
                             <path d="M12 16v4" />
@@ -175,12 +122,37 @@ export default function Home() {
                 })}
               </div>
 
-              {mode === "student" ? <StudentJoin /> : <StaffLogin />}
-            </div>
+              <div role="tabpanel" id="access-panel-student" aria-labelledby="access-tab-student" hidden={mode !== "student"}>
+                {mode === "student" && <StudentJoin />}
+              </div>
+              <div role="tabpanel" id="access-panel-staff" aria-labelledby="access-tab-staff" hidden={mode !== "staff"}>
+                {mode === "staff" && <StaffLogin />}
+              </div>
+          </section>
+          <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+            {(me?.student?.sessionStatus === "active" || me?.staff) && (
+              <div className="mb-6 space-y-2">
+                {me?.student?.sessionStatus === "active" && <ContinueCard label={`Continue as ${me.student.name}`} sub={me.student.sessionTitle} badge="Active session" href="/student" />}
+                {me?.staff && <ContinueCard label={`Continue as ${me.staff.name}`} sub={me.staff.role === "teacher" ? "Teacher dashboard" : "Teacher Educator dashboard"} badge="Signed in" href={me.staff.role === "teacher" ? "/teacher" : "/educator"} />}
+              </div>
+            )}
+            <section aria-labelledby="inquiry-stages" className="border-t border-slate-300 pt-4">
+              <h2 id="inquiry-stages" className="text-xs font-semibold tracking-[0.13em] text-slate-600 uppercase">The investigation cycle</h2>
+              <ol className="mt-2 divide-y divide-slate-200">
+                {INQUIRY_STAGES.map((stage, i) => (
+                  <li key={stage.title} className="flex items-start gap-3 py-3">
+                    <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-violet-100 text-xs font-semibold tabular-nums text-violet-800">{`0${i + 1}`}</span>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{stage.title}</p>
+                      <p className="mt-0.5 text-sm leading-snug text-slate-600">{stage.desc}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
           </div>
-        </div>
-      </div>
-    </main>
+      </main>
+    </>
   );
 }
 
@@ -198,7 +170,7 @@ function ContinueCard({
   return (
     <a
       href={href}
-      className="group flex items-center justify-between rounded-2xl border border-indigo-200/90 bg-white/90 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-400 hover:shadow-md"
+      className="group flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 transition hover:border-blue-400"
     >
       <div className="min-w-0 pr-3">
         <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
@@ -284,19 +256,18 @@ function StudentJoin() {
       <form onSubmit={findSession} className="space-y-5">
         <div>
           <h2 className="text-xl font-bold tracking-tight text-slate-900">Join your session</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Enter the session code projected on your classroom screen.
+          <p className="mt-1 text-sm leading-relaxed text-slate-600">
+            Enter the six-character code from your teacher.
           </p>
         </div>
 
-        <Field label="Session join code" hint="Ask your teacher for the 6-letter join code.">
+        <Field label="Session join code">
           <input
-            className="input h-14 rounded-xl border-slate-300 bg-slate-50/70 text-center font-mono text-2xl font-bold uppercase tracking-[0.35em] text-indigo-950 transition focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/15"
+            className="input h-12 bg-slate-50 text-center font-mono text-xl font-semibold uppercase tracking-[0.3em] text-blue-900 placeholder:text-slate-400"
             placeholder="ABCDEF"
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             maxLength={8}
-            autoFocus
             required
             autoComplete="off"
           />
@@ -448,6 +419,7 @@ function StaffLogin() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [demo, setDemo] = useState<Demo[]>([]);
@@ -475,14 +447,14 @@ function StaffLogin() {
     <form onSubmit={submit} className="space-y-4">
       <div>
         <h2 className="text-xl font-bold tracking-tight text-slate-900">Staff sign in</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Access your live classroom monitor, AI analysis drafts, or curriculum templates.
+        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+          Sign in with your teacher or teacher educator account.
         </p>
       </div>
 
       <Field label="Email address">
         <input
-          className="input rounded-xl"
+          className="input min-h-11"
           type="email"
           placeholder="name@school.edu.hk"
           value={email}
@@ -492,17 +464,16 @@ function StaffLogin() {
         />
       </Field>
 
-      <Field label="Password">
-        <input
-          className="input rounded-xl"
-          type="password"
-          placeholder="••••••••"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          autoComplete="current-password"
-        />
-      </Field>
+      <div>
+        <label className="label" htmlFor="staff-password">Password</label>
+        <div className="relative">
+          <input id="staff-password" className="input min-h-11 pr-18" type={showPassword ? "text" : "password"}
+            value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
+          <button type="button" aria-controls="staff-password" aria-label={showPassword ? "Hide password" : "Show password"}
+            className="absolute inset-y-0 right-0 min-w-16 rounded-r-lg px-3 text-xs font-semibold text-blue-800 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+            onClick={() => setShowPassword((value) => !value)}>{showPassword ? "Hide" : "Show"}</button>
+        </div>
+      </div>
 
       {err && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700" role="alert">

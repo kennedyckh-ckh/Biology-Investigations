@@ -3,6 +3,7 @@ import { use, useEffect, useState } from "react";
 import { usePoll } from "@/lib/client/api";
 import { EntryBody, TagBadge, Spinner, ErrorBox } from "@/components/ui";
 import { AiView, type AiContent } from "@/components/ai-view";
+import { BrandLogo } from "@/components/brand-logo";
 import type { TableData } from "@/components/ui";
 
 interface Proj {
@@ -32,9 +33,12 @@ export default function ProjectorPage({ params }: { params: Promise<{ id: string
 
   return (
     <div className="projector min-h-screen bg-white px-[4vw] py-[3vh] text-slate-900">
-      <div className={`mb-2 flex flex-wrap items-start justify-between gap-3 ${hideBar ? "invisible" : ""}`}>
-        <span className="text-sm font-semibold uppercase tracking-widest text-slate-400">Projector view · published content only</span>
-        <div className="flex gap-2">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <BrandLogo className="w-36 sm:w-48" />
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">Projector view · published content only</span>
+        </div>
+        <div className={`flex flex-wrap gap-2 ${hideBar ? "invisible" : ""}`}>
           <button className="btn-ghost btn-sm" onClick={() => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())}>
             Full screen
           </button>

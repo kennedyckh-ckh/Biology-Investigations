@@ -3,7 +3,7 @@ import "./globals.css";
 import { ToastProvider } from "@/components/ui";
 
 export const metadata: Metadata = {
-  title: "Scientific Investigations",
+  title: "Scientific Investigations | Innovations in Biology Investigations",
   description: "Design, enact and reflect on scientific investigations together.",
 };
 
