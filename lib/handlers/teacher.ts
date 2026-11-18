@@ -84,6 +84,7 @@ function sessionDetail(s: Row) {
     critiquePrompts: critiquePromptsOf(s),
     entryTags: entryTagsFor(sid),
     designTagHints: designHintsFor(sid),
+    designHintsVisible: designHintsVisible(sid),
     aiCriteria: s.ai_criteria,
     pedagogyNotes: s.pedagogy_notes,
     source: s.source_template_id ? { templateId: num(s.source_template_id), title: src?.title ?? "(removed)", importedVersion: num(s.source_version), currentVersion: src ? num(src.version) : null } : null,
@@ -178,14 +179,31 @@ route("PUT", "/teacher/sessions/:id/parts/:n", (ctx) => {
   mustBeActive(s);
   const part = partNo(ctx.params.n);
   const b = ctx.body || {};
-  const instructions = str(b.instructions, 5000, "Instructions", { optional: true });
+  const instructions = str(b.instructions, LIMITS.instructionTextMax, "Instructions", { optional: true });
   const link = safeLink(b.webLink);
   if (!Array.isArray(b.questions)) throw bad("Guiding questions must be a list");
   const qs = (b.questions as unknown[]).map((q) => str(q, 500, "Guiding question", { optional: true })).filter(Boolean);
   if (qs.length > 20) throw bad("At most 20 guiding questions per part");
+  let blocksJson: string | undefined;
+  if ("instructionBlocks" in b) {
+    if (!Array.isArray(b.instructionBlocks) || b.instructionBlocks.length > LIMITS.instructionBlockCount) {
+      throw bad(`Use up to ${LIMITS.instructionBlockCount} task blocks per part.`);
+    }
+    blocksJson = JSON.stringify((b.instructionBlocks as unknown[]).map((block) => {
+      if (!block || typeof block !== "object") throw bad("Invalid task block.");
+      const value = block as { title?: unknown; text?: unknown };
+      return {
+        title: str(value.title, LIMITS.instructionTitleMax, "Task heading", { optional: true }),
+        text: str(value.text, LIMITS.instructionTextMax, "Task instructions"),
+      };
+    }));
+  }
   tx(() => {
     run("UPDATE session_parts SET instructions=?, web_link=? WHERE session_id=? AND part=?", instructions, link, num(s.id), part);
     setQuestions(num(s.id), part, qs);
+    if (blocksJson !== undefined) {
+      run("INSERT INTO part_instruction_blocks(session_id,part,blocks_json) VALUES(?,?,?) ON CONFLICT(session_id,part) DO UPDATE SET blocks_json=excluded.blocks_json", num(s.id), part, blocksJson);
+    }
   });
   return { parts: partConfig(num(s.id)) };
 });
@@ -193,7 +211,7 @@ route("PUT", "/teacher/sessions/:id/parts/:n", (ctx) => {
 const attachmentPath = "/teacher/sessions/:id/parts/:n/attachment";
 route("GET", attachmentPath, (ctx) => {
   const sid = num(ownSession(ctx, ctx.params.id).id);
-  return downloadInstructionFile(attachmentRow(sid, partNo(ctx.params.n)));
+  return downloadInstructionFile(attachmentRow(sid, partNo(ctx.params.n)), ctx.query.get("preview") === "1");
 });
 route("PUT", attachmentPath, async (ctx) => {
   const s = ownSession(ctx, ctx.params.id);
@@ -357,7 +375,9 @@ route("GET", "/teacher/sessions/:id/status", (ctx) => {
   }));
   const recovery = all("SELECT r.id,r.created_at,s.name,s.class,s.class_no,g.name AS group_name FROM recovery_requests r JOIN students s ON s.id=r.student_id JOIN groups g ON g.id=s.group_id WHERE s.session_id=? AND r.approved_at IS NULL ORDER BY r.id", sid).map((r) => ({ id: num(r.id), name: r.name, class: r.class, classNo: r.class_no, group: r.group_name, createdAt: num(r.created_at) }));
   const overrides = all("SELECT part,reason,at,missing_groups_json FROM part_overrides WHERE session_id=? ORDER BY id DESC", sid).map((o) => ({ part: num(o.part), reason: o.reason, at: num(o.at), missing: JSON.parse(String(o.missing_groups_json)) }));
-  return { status: s.status, designHintsVisible: designHintsVisible(sid), parts: partConfig(sid).map((p) => ({ part: p.part, title: PART_TITLES[p.part], visibility: p.visibility })), groups, summary, recovery, overrides };
+  const tags = entryTagsFor(sid);
+  const designHintCount = designHintsFor(sid).filter(({ tag }) => tags.includes(tag)).length;
+  return { status: s.status, designHintsVisible: designHintsVisible(sid), designHintCount, parts: partConfig(sid).map((p) => ({ part: p.part, title: PART_TITLES[p.part], visibility: p.visibility })), groups, summary, recovery, overrides };
 });
 
 const individualPath = "/teacher/sessions/:id/students/:studentId/parts/:part/submission";
@@ -537,7 +557,7 @@ route("GET", "/teacher/sessions/:id/export", (ctx) => {
   let type: string;
   if (fmt === "json") {
     payload = JSON.stringify(
-      { session: { id: sid, title: s.title, exportedAt: new Date().toISOString() }, stages: parts.map((p) => ({ part: p.part, label: PART_TITLES[p.part], instructions: p.instructions, webLink: p.webLink, guidingQuestions: p.questions.map((q) => q.text) })), entries, aiOutputs: ai },
+      { session: { id: sid, title: s.title, exportedAt: new Date().toISOString() }, stages: parts.map((p) => ({ part: p.part, label: PART_TITLES[p.part], instructions: p.instructions, instructionBlocks: p.instructionBlocks, webLink: p.webLink, guidingQuestions: p.questions.map((q) => q.text) })), entries, aiOutputs: ai },
       null,
       2
     );

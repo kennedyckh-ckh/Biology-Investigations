@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { all, get, run, tx, now, num, type Row } from "./db";
-import { DEFAULT_CRITIQUE_PROMPTS, TAGS, type DesignTagHint } from "./constants";
+import { DEFAULT_CRITIQUE_PROMPTS, TAGS, type DesignTagHint, type InstructionBlock } from "./constants";
 import { attachmentInfo } from "./instruction-files";
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -57,12 +57,18 @@ export function questionsFor(sessionId: number, part: number): { id: number; tex
   return all("SELECT id,text FROM session_questions WHERE session_id=? AND part=? ORDER BY position,id", sessionId, part).map((q) => ({ id: num(q.id), text: String(q.text) }));
 }
 
+export function instructionBlocksFor(sessionId: number, part: number): InstructionBlock[] {
+  const saved = get("SELECT blocks_json FROM part_instruction_blocks WHERE session_id=? AND part=?", sessionId, part);
+  return saved ? JSON.parse(String(saved.blocks_json)) as InstructionBlock[] : [];
+}
+
 export function partConfig(sessionId: number) {
   return [1, 2, 3].map((part) => {
     const p = get("SELECT * FROM session_parts WHERE session_id=? AND part=?", sessionId, part)!;
     return {
       part,
       instructions: String(p.instructions),
+      instructionBlocks: instructionBlocksFor(sessionId, part),
       webLink: String(p.web_link),
       attachment: attachmentInfo(sessionId, part, true),
       visibility: String(p.visibility),

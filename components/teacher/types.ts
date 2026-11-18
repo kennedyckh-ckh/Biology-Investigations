@@ -1,9 +1,10 @@
 import type { TableData } from "@/components/ui";
-import type { DesignTagHint, InstructionFile } from "@/lib/constants";
+import type { DesignTagHint, InstructionBlock, InstructionFile } from "@/lib/constants";
 
 export interface PartCfg {
   part: number;
   instructions: string;
+  instructionBlocks: InstructionBlock[];
   webLink: string;
   attachment: InstructionFile | null;
   visibility: "hidden" | "visible" | "open";
@@ -18,6 +19,7 @@ export interface SessionDetail {
   critiquePrompts: { key: string; label: string; enabled: boolean }[];
   entryTags: string[];
   designTagHints: DesignTagHint[];
+  designHintsVisible: boolean;
   aiCriteria: string;
   pedagogyNotes: string;
   source: { templateId: number; title: string; importedVersion: number; currentVersion: number | null } | null;
@@ -41,6 +43,7 @@ export interface TEntry {
 export interface StatusResp {
   status: string;
   designHintsVisible: boolean;
+  designHintCount: number;
   parts: { part: number; title: string; visibility: "hidden" | "visible" | "open" }[];
   groups: {
     id: number;

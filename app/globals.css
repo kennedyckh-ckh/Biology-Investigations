@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Institutional palette: graphite, ink navy, and muted harbour teal. */
+/* Academic palette: ink navy, academic blue and cool paper neutrals. */
 @theme {
   --color-slate-50: #f5f7f8;
   --color-slate-100: #edf1f3;
@@ -12,17 +12,17 @@
   --color-slate-700: #293c4a;
   --color-slate-800: #1f303f;
   --color-slate-900: #172736;
-  --color-blue-50: #edf3f7;
-  --color-blue-100: #e2ebf3;
-  --color-blue-200: #c9dae7;
-  --color-blue-300: #a5bccd;
-  --color-blue-400: #63839c;
-  --color-blue-500: #466e8c;
-  --color-blue-600: #345b77;
-  --color-blue-700: #26485f;
-  --color-blue-800: #1d3b51;
-  --color-blue-900: #172d3e;
-  --color-blue-950: #10212f;
+  --color-blue-50: #eef3f9;
+  --color-blue-100: #e1eaf5;
+  --color-blue-200: #c8d8ec;
+  --color-blue-300: #a9bfdb;
+  --color-blue-400: #7798bd;
+  --color-blue-500: #537ba9;
+  --color-blue-600: #375e8a;
+  --color-blue-700: #284c75;
+  --color-blue-800: #1c385b;
+  --color-blue-900: #132b49;
+  --color-blue-950: #0d1e36;
   --color-indigo-50: #eef3f7;
   --color-indigo-100: #e4edf3;
   --color-indigo-200: #cadbe6;
@@ -32,20 +32,20 @@
   --color-indigo-700: #26485f;
   --color-indigo-800: #1d3b51;
   --color-indigo-900: #172d3e;
-  --color-violet-50: #edf5f3;
-  --color-violet-100: #dfedeb;
-  --color-violet-200: #c4dfda;
-  --color-violet-300: #9dc4bd;
-  --color-violet-500: #477f78;
-  --color-violet-600: #2b635d;
-  --color-violet-700: #23544f;
-  --color-violet-800: #1c4642;
-  --color-violet-900: #163934;
-  --color-violet-950: #102b27;
+  --color-violet-50: #edf2fa;
+  --color-violet-100: #dfe8f6;
+  --color-violet-200: #c8d6ed;
+  --color-violet-300: #a6bbdc;
+  --color-violet-500: #577caf;
+  --color-violet-600: #3c6090;
+  --color-violet-700: #304f7b;
+  --color-violet-800: #243e66;
+  --color-violet-900: #1b3052;
+  --color-violet-950: #12213d;
 }
 
 :root {
-  --ink: #172736;
+  --ink: #14283e;
 }
 
 body {

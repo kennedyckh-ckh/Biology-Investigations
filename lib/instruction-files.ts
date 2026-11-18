@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createWriteStream, createReadStream, mkdirSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, createWriteStream, createReadStream, mkdirSync, openSync, readSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
@@ -11,6 +11,28 @@ import { bad, HttpError, notFound } from "./router";
 const DIR = path.join(UPLOAD_DIR, "instructions");
 const tooLarge = () => new HttpError(413, "too_large", "Instruction files must be 500 MB or smaller.");
 export const uploadsInProgress = new Set<string>();
+const previewMimeCache = new Map<string, string | null>();
+
+function previewMime(storageName: string) {
+  if (previewMimeCache.has(storageName)) return previewMimeCache.get(storageName) ?? null;
+  const head = Buffer.alloc(16);
+  let n: number;
+  try {
+    const fd = openSync(path.join(DIR, storageName), "r");
+    try { n = readSync(fd, head, 0, head.length, 0); } finally { closeSync(fd); }
+  } catch {
+    // Don’t cache an inaccessible file: it may reappear after restoring storage.
+    return null;
+  }
+  const png = n >= 16 && head.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && head.toString("latin1", 12, 16) === "IHDR";
+  const jpeg = n >= 4 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
+  const webp = n >= 16 && head.toString("latin1", 0, 4) === "RIFF" && head.toString("latin1", 8, 12) === "WEBP" && ["VP8 ", "VP8L", "VP8X"].includes(head.toString("latin1", 12, 16));
+  const gif = n >= 13 && ["GIF87a", "GIF89a"].includes(head.toString("latin1", 0, 6));
+  const mime = png ? "image/png" : jpeg ? "image/jpeg" : webp ? "image/webp" : gif ? "image/gif" : null;
+  if (previewMimeCache.size >= 512) previewMimeCache.clear();
+  previewMimeCache.set(storageName, mime);
+  return mime;
+}
 
 export function attachmentRow(sid: number, part: number) {
   return get("SELECT * FROM instruction_attachments WHERE session_id=? AND part=?", sid, part);
@@ -19,10 +41,17 @@ export function attachmentRow(sid: number, part: number) {
 export function attachmentInfo(sid: number, part: number, teacher = false): InstructionFile | null {
   const row = attachmentRow(sid, part);
   const prefix = teacher ? `/api/teacher/sessions/${sid}` : "/api/student";
-  return row ? { name: String(row.name), size: num(row.size), url: `${prefix}/parts/${part}/attachment` } : null;
+  if (!row) return null;
+  const url = `${prefix}/parts/${part}/attachment`;
+  const storageName = String(row.storage_name);
+  return {
+    name: String(row.name), size: num(row.size), url,
+    previewUrl: previewMime(storageName) ? `${url}?preview=1&v=${encodeURIComponent(storageName)}` : null,
+  };
 }
 
 export function removeInstructionFile(storageName: string) {
+  previewMimeCache.delete(storageName);
   try {
     unlinkSync(path.join(DIR, storageName));
   } catch (error) {
@@ -65,20 +94,24 @@ export async function receiveInstructionFile(req: Request) {
   }
 }
 
-export function downloadInstructionFile(row: Row | undefined) {
+export function downloadInstructionFile(row: Row | undefined, preview = false) {
   if (!row) throw notFound("No instruction file is attached.");
-  const file = path.join(DIR, String(row.storage_name));
+  const storageName = String(row.storage_name);
+  const file = path.join(DIR, storageName);
   const size = statSync(file, { throwIfNoEntry: false })?.size;
   if (size !== num(row.size)) throw notFound("The instruction file is unavailable.");
   const name = String(row.name);
   const fallback = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
   const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  const mime = preview ? previewMime(storageName) : null;
+  if (preview && !mime) throw new HttpError(415, "not_previewable", "This attachment is not a supported image.");
   return new Response(Readable.toWeb(createReadStream(file)) as unknown as ReadableStream, {
     headers: {
-      "Content-Type": "application/octet-stream",
-      "Content-Disposition": `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`,
+      "Content-Type": mime ?? "application/octet-stream",
+      "Content-Disposition": `${mime ? "inline" : "attachment"}; filename="${fallback}"; filename*=UTF-8''${encoded}`,
       "Content-Length": String(size),
       "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
     },
   });
 }

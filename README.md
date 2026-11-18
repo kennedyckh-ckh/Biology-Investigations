@@ -36,9 +36,10 @@ The four `INITIAL_…` values are only used to create the first two staff accoun
 - Sign in as **Teacher Educator → Teachers you support → Add teacher** to provision another classroom teacher with their own email and private password. The teacher will be linked to that educator, who can assign them templates but cannot view their live sessions. No new Render environment variables are needed.
 - Students can join as new without approval, even if their details match another student's. They can choose **Recover my previous work on a new device** instead; that separate action still verifies a group PIN or requires teacher approval.
 
-- In **Setup**, upload, replace or remove the **Instruction file** in each part. Students can download it once that part is open. Uploaded files are downloads, not embedded previews; upload only files suitable for your class.
+- In **Setup**, keep a **Part overview** and use **Add task block** to create up to 12 ordered tasks in each part. Use the arrows to change their order, then save the part. The overview, web link, guiding questions and one shared instruction file still apply to the whole part.
+- Upload, replace or remove the shared **Instruction file** in each part. When the part opens, students see PNG, JPEG, WebP and GIF diagrams directly on the page. Other files remain downloadable; export diagrams as PNG if you want them to appear inline.
 - In **Setup → Session settings → Customise entry tags**, edit the list one tag per line, then click **Save settings**. Defaults apply until customised. Existing entries retain their original tags.
-- In **Setup → Session settings**, add or rename peer critique prompts and write **Design tag hints**. Hints start hidden. Click **Live monitor → Show design tag hints** to make the panel available to students while Part 1 is open, and **Hide design tag hints** to withdraw it.
+- In **Setup → Session settings**, add or rename peer critique prompts and write and save **Design entry-tag hints**. Click **Live monitor → Show design tag hints** to release the hints, or **Hide design tag hints** to withdraw them. In open Part 1, students click **Entry-tag hints** beside **Group entries** to read the released hints one at a time.
 - Students can click **Submit my work** for each open part. It submits only their own entries and does not submit or lock classmates' work. Teachers can review and reopen individual submissions under **Live monitor → Group progress**. Group submission is still a separate action.
 - In **Class board**, students can Star or Heart a peer's shared response. Selecting the same reaction again removes it. Only aggregate counts and the student's own selection are shown, not the names of students who reacted.
 
@@ -96,7 +97,7 @@ Every API route calls one of the guards in `lib/authz.ts` before touching data:
 Run the tests against a running server (a fresh database is best):
 
 ```bash
-BASE=http://localhost:3100 npm run test:api    # 141 permission & workflow checks
+BASE=http://localhost:3100 npm run test:api    # Permission & workflow checks
 BASE=http://localhost:3100 npm run test:ai     # 50 AI workflow & guardrail checks
 npm run test:unit                              # 14 prompt-hardening / validation / fuzz checks
 ```

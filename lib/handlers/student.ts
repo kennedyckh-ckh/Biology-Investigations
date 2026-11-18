@@ -11,7 +11,7 @@ import {
   onlineEditors,
 } from "../authz";
 import { entriesWhere, validateTag, validateTable, saveImage, deleteImageFile, readImage } from "../entries";
-import { designHintsFor, designHintsVisible, entryTagsFor, questionsFor } from "../sessions";
+import { designHintsFor, designHintsVisible, entryTagsFor, instructionBlocksFor, questionsFor } from "../sessions";
 import { publishedShares, publishedAi, critiquePromptsOf, reactionsFor } from "../sharing";
 import { attachmentInfo, attachmentRow, downloadInstructionFile } from "../instruction-files";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS } from "../constants";
@@ -31,6 +31,7 @@ route("GET", "/student/state", (ctx) => {
       return {
         ...base,
         instructions: String(p.instructions),
+        instructionBlocks: instructionBlocksFor(sid, part),
         webLink: String(p.web_link),
         attachment: attachmentInfo(sid, part),
         questions: questionsFor(sid, part),
@@ -63,7 +64,7 @@ route("GET", "/student/parts/:n/attachment", (ctx) => {
   const sc = requireStudent(ctx);
   const part = partNo(ctx.params.n);
   assertStudentCanRead(sc, part);
-  return downloadInstructionFile(attachmentRow(num(sc.session.id), part));
+  return downloadInstructionFile(attachmentRow(num(sc.session.id), part), ctx.query.get("preview") === "1");
 });
 
 route("GET", "/student/entries", (ctx) => {
