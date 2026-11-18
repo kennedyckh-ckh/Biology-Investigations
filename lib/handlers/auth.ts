@@ -2,7 +2,7 @@ import { route, bad, forbidden, notFound, HttpError, str, type Ctx } from "../ro
 import { all, get, run, tx, now, num, audit } from "../db";
 import { verifyPassword, issueToken, revokeToken, rateLimit, rateLimitReset, STAFF_COOKIE, STUDENT_COOKIE } from "../auth";
 import { LIMITS } from "../constants";
-import { DEMO_ACCOUNTS } from "../seed";
+import { DEMO_ACCOUNTS, isDemoPassword, usesPrivateStaff } from "../seed";
 
 const nameKey = (name: string, cls: string, no: string) => [name, cls, no].map((s) => s.trim().toLowerCase().replace(/\s+/g, " ")).join("|");
 
@@ -13,7 +13,9 @@ route("POST", "/auth/login", (ctx) => {
   const k2 = `login:${email}`;
   if (!rateLimit(k1, 30, 300000) || !rateLimit(k2, 8, 300000)) throw new HttpError(429, "rate_limited", "Too many sign-in attempts. Please wait a few minutes.");
   const u = get("SELECT * FROM users WHERE email=?", email);
-  if (!u || !verifyPassword(password, String(u.password_hash))) throw new HttpError(401, "invalid_credentials", "Email or password is incorrect.");
+  if (!u || (usesPrivateStaff() && isDemoPassword(password)) || !verifyPassword(password, String(u.password_hash))) {
+    throw new HttpError(401, "invalid_credentials", "Email or password is incorrect.");
+  }
   rateLimitReset(k2);
   if (ctx.auth.staffToken) revokeToken(ctx.auth.staffToken);
   const { token, maxAge } = issueToken("staff", num(u.id));
@@ -40,7 +42,7 @@ route("GET", "/auth/me", (ctx) => {
 });
 
 route("GET", "/auth/demo-accounts", () => {
-  if (process.env.HIDE_DEMO_ACCOUNTS === "1") return { accounts: [] };
+  if (usesPrivateStaff() || process.env.HIDE_DEMO_ACCOUNTS === "1") return { accounts: [] };
   return { accounts: DEMO_ACCOUNTS.map((a) => ({ role: a.role, name: a.name, email: a.email, password: a.password })) };
 });
 

@@ -28,6 +28,43 @@ export const DEMO_ACCOUNTS = [
   },
 ] as const;
 
+export function usesPrivateStaff() {
+  return process.env.STAFF_BOOTSTRAP_MODE === "private" || process.env.RENDER === "true";
+}
+
+export function isDemoPassword(password: string) {
+  return DEMO_ACCOUNTS.some((account) => account.password === password);
+}
+
+function seedPrivateStaff() {
+  tx(() => {
+    if (get("SELECT 1 FROM users LIMIT 1")) return;
+
+    const accounts = [
+      { role: "educator", name: "Teacher Educator", env: "INITIAL_EDUCATOR" },
+      { role: "teacher", name: "Teacher", env: "INITIAL_TEACHER" },
+    ].map((account) => {
+      const email = process.env[`${account.env}_EMAIL`]?.trim().toLowerCase() ?? "";
+      const password = process.env[`${account.env}_PASSWORD`]?.trim() ?? "";
+      if (email.length > 200 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new Error(`Set ${account.env}_EMAIL to a valid email address.`);
+      }
+      if (password.length < 16 || password.length > 200 || isDemoPassword(password)) {
+        throw new Error(`Set ${account.env}_PASSWORD to a private password of 16–200 characters.`);
+      }
+      return { ...account, email, password };
+    });
+    if (accounts[0].email === accounts[1].email || accounts[0].password === accounts[1].password) {
+      throw new Error("The initial educator and teacher need different emails and passwords.");
+    }
+    const [educatorId, teacherId] = accounts.map(({ role, name, email, password }) =>
+      run("INSERT INTO users(role,name,email,password_hash,created_at) VALUES(?,?,?,?,?)",
+        role, name, email, hashPassword(password), now()).id
+    );
+    run("INSERT INTO educator_teacher(educator_id,teacher_id) VALUES(?,?)", educatorId, teacherId);
+  });
+}
+
 /**
  * Updates the original demo accounts without recreating them.
  * Account IDs, password hashes, assignments, and associated data are preserved.
@@ -90,6 +127,10 @@ function updateExistingDemoAccounts() {
 }
 
 export function seedIfEmpty() {
+  if (usesPrivateStaff()) {
+    seedPrivateStaff();
+    return;
+  }
   // Apply account changes even when the database already contains users.
   updateExistingDemoAccounts();
 

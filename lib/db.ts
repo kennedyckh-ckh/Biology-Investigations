@@ -13,6 +13,7 @@ interface Stmt {
   run(...p: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint };
 }
 interface DB {
+  close(): void;
   exec(sql: string): void;
   prepare(sql: string): Stmt;
 }
@@ -229,9 +230,16 @@ export function db(): DB {
   const g = globalThis as G;
   if (!g.__db) {
     g.__db = open();
-    // lazy import avoids a circular dependency at module load
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("./seed").seedIfEmpty();
+    try {
+      // lazy import avoids a circular dependency at module load
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require("./seed").seedIfEmpty();
+    } catch (error) {
+      const failedDb = g.__db;
+      delete g.__db;
+      failedDb.close();
+      throw error;
+    }
   }
   return g.__db;
 }

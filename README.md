@@ -16,17 +16,30 @@ npm start            # http://localhost:3000  (for another port: npx next start 
 `npm run dev` works too. Data lives in `./data` (`app.db` + `uploads/`). Override with `DATA_DIR=/some/path`.
 Optional demo class: with the app running, `BASE=http://localhost:3000 npm run seed:demo`.
 
-## Test accounts (seeded on first start)
+## Deploy to Render
+
+This is a Node.js web service, not a Static Site. The root [`render.yaml`](render.yaml) configures the build, health check and a 1 GB persistent disk for SQLite and uploaded images.
+
+1. In the Render Dashboard, choose **New → Blueprint**, connect GitHub and select this repository. Choose the branch that contains `render.yaml`, or `main` after the changes have been merged.
+2. Enter `INITIAL_EDUCATOR_EMAIL`, `INITIAL_EDUCATOR_PASSWORD`, `INITIAL_TEACHER_EMAIL` and `INITIAL_TEACHER_PASSWORD` in Render. Use distinct email addresses and distinct private passwords of at least 16 characters; don't commit credentials to GitHub.
+3. Review the paid web service and disk before creating the Blueprint. A free web service cannot attach a persistent disk ([Render persistent disks](https://render.com/docs/disks)).
+4. When the deploy is live, open the Render URL. Sign in with the initial educator or teacher account. Create a test session, join as a student and confirm that the session still exists after a restart.
+
+For an existing Render service, update it in place rather than creating a second service. Use the build and start commands, Node version, environment and health check settings from this repository. Keep the existing persistent disk and `DATA_DIR` if it already contains classroom data. Back up your database and uploads before switching settings or moving data; a new disk starts empty. Do not copy a local demo database into a public service: private mode blocks the known demo passwords but does not replace existing accounts, rotate their credentials or revoke old sessions.
+
+The four `INITIAL_…` values are only used to create the first two staff accounts on an empty database. The educator and teacher are linked automatically. Editing those values later does not change any existing password. Local development still uses the demo setup by default, but on Render demo sign-in is disabled and the demo accounts are not seeded. The app uses mock AI by default unless a real provider is configured.
+
+## Local test accounts (seeded on first start)
 
 | Role | Email | Password |
 |---|---|---|
 | Teacher 1 | teacher1@school.test | `Teacher1!demo` |
 | Teacher 2 | teacher2@school.test | `Teacher2!demo` |
 | Teacher 3 | teacher3@school.test | `Teacher3!demo` |
-| Teacher Educator | educator@school.test | `Educator1!demo` |
+| Teacher Educator | See the local sign-in page’s test accounts | `Educator1!demo` |
 
 The educator supports Teachers 1 and 2 (they receive its templates). **Teacher 3 is deliberately unassigned**, so you can see access control refusing it. A sample template, *"Which paper towel absorbs the most water?"*, is shared with Teachers 1 and 2.
-The sign-in page shows these accounts in a "Test accounts" box; set `HIDE_DEMO_ACCOUNTS=1` to hide it. **Change or remove these accounts before any real use.**
+The local sign-in page shows these accounts in a "Test accounts" box. `HIDE_DEMO_ACCOUNTS=1` only hides the box; use the private staff setup above for hosted deployments.
 
 Students need no account: they enter the session **join code**, name, class, class number and pick a group.
 

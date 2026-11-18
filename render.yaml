@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: scientific-investigations
+    runtime: node
+    plan: 0.5c-512mb
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start -- --hostname 0.0.0.0
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off"
+    disk:
+      name: classroom-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: STAFF_BOOTSTRAP_MODE
+        value: private
+      - key: INITIAL_EDUCATOR_EMAIL
+        sync: false
+      - key: INITIAL_EDUCATOR_PASSWORD
+        sync: false
+      - key: INITIAL_TEACHER_EMAIL
+        sync: false
+      - key: INITIAL_TEACHER_PASSWORD
+        sync: false
