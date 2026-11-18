@@ -39,7 +39,7 @@ export default function StudentPreviewPage({ params }: { params: Promise<{ id: s
         <section className="rounded-xl border border-slate-200 bg-white p-4">
           <h3 className="mb-1 text-sm font-semibold text-blue-950">Entry tags available to students</h3>
           <p className="text-sm text-slate-600">Group entries, drafting and submissions aren’t shown in this preview.</p>
-          <ul className="mt-3 flex flex-wrap gap-2">{data.entryTags.map((tag) => <li key={tag} className="badge bg-blue-50 text-blue-900">{tag}</li>)}</ul>
+          <ul className="mt-3 flex flex-wrap gap-2">{(part.entryTags ?? data.entryTags).map((tag) => <li key={tag} className="badge bg-blue-50 text-blue-900">{tag}</li>)}</ul>
         </section>
       </>}
       {tab === "class" && <ClassBoard previewEndpoint={`${endpoint}/class`} />}

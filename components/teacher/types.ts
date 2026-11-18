@@ -1,5 +1,5 @@
 import type { TableData } from "@/components/ui";
-import type { DesignTagHint, InstructionBlock, InstructionFile } from "@/lib/constants";
+import type { CritiquePrompt, DesignTagHint, InstructionBlock, InstructionFile } from "@/lib/constants";
 
 export interface PartCfg {
   part: number;
@@ -9,6 +9,8 @@ export interface PartCfg {
   attachment: InstructionFile | null;
   visibility: "hidden" | "visible" | "open";
   questions: { id: number; text: string }[];
+  entryTags: string[];
+  critiquePrompts: CritiquePrompt[];
 }
 export interface SessionDetail {
   id: number;

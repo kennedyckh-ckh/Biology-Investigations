@@ -11,15 +11,16 @@ import { Contributions } from "@/components/teacher/contributions";
 import { Sharing, ExportTab } from "@/components/teacher/sharing";
 import { AiTab } from "@/components/teacher/ai-tab";
 import type { SessionDetail } from "@/components/teacher/types";
+import { WorkspaceIcon } from "@/components/workspace-icon";
 
 const TABS = [
-  ["monitor", "Live monitor"],
-  ["setup", "Setup"],
-  ["groups", "Groups"],
-  ["contrib", "Contributions"],
-  ["sharing", "Sharing"],
-  ["ai", "AI analysis"],
-  ["export", "Export"],
+  ["monitor", "Live monitor", "monitor"],
+  ["setup", "Setup", "settings"],
+  ["groups", "Groups", "groups"],
+  ["contrib", "Contributions", "entries"],
+  ["sharing", "Sharing", "share"],
+  ["ai", "AI analysis", "analysis"],
+  ["export", "Export", "download"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -70,9 +71,9 @@ function Inner({ id }: { id: string }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <a className="btn-primary" href={`/teacher/sessions/${s.id}/student-view`} target="_blank" rel="noopener noreferrer">Student view</a>
+          <a className="btn-primary" href={`/teacher/sessions/${s.id}/student-view`} target="_blank" rel="noopener noreferrer"><WorkspaceIcon name="eye" />Student view</a>
           <a className="btn-accent" href={`/teacher/sessions/${s.id}/projector`} target="_blank" rel="noopener noreferrer">
-            📽 Projector view
+            <WorkspaceIcon name="board" />Projector view
           </a>
           {archived ? (
             <>
@@ -93,9 +94,9 @@ function Inner({ id }: { id: string }) {
       {archived && <div className="mb-4 rounded-xl bg-amber-100 p-3 text-sm font-medium text-amber-900">This session is archived: read-only for you, closed to students. Restore it to make changes, or delete it permanently.</div>}
 
       <nav className="mb-6 flex gap-1 overflow-x-auto rounded-t-lg border-b border-blue-200 bg-white" aria-label="Session sections">
-        {TABS.map(([k, label]) => (
-          <button key={k} onClick={() => setTab(k)} aria-current={tab === k ? "page" : undefined} className={`whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold ${tab === k ? "border-blue-700 bg-blue-50 text-blue-900" : "border-transparent text-slate-600 hover:bg-blue-50 hover:text-blue-900"}`}>
-            {label}
+        {TABS.map(([k, label, icon]) => (
+          <button key={k} onClick={() => setTab(k)} aria-current={tab === k ? "page" : undefined} className={`flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold ${tab === k ? "border-blue-700 bg-blue-50 text-blue-900" : "border-transparent text-slate-600 hover:bg-blue-50 hover:text-blue-900"}`}>
+            <WorkspaceIcon name={icon} />{label}
           </button>
         ))}
       </nav>

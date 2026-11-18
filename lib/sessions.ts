@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { all, get, run, tx, now, num, type Row } from "./db";
 import { DEFAULT_CRITIQUE_PROMPTS, PART_TITLES, TAGS, type DesignTagHint, type InstructionBlock } from "./constants";
 import { attachmentInfo, taskAttachmentInfo } from "./instruction-files";
+import { stageCritiquePrompts } from "./sharing";
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export function newJoinCode(): string {
@@ -70,6 +71,7 @@ export function instructionBlocksFor(sessionId: number, part: number, prefix?: s
 
 export function partConfig(sessionId: number) {
   const prefix = `/api/teacher/sessions/${sessionId}`;
+  const promptLists = stageCritiquePrompts(sessionRow(sessionId));
   return [1, 2, 3].map((part) => {
     const p = get("SELECT * FROM session_parts WHERE session_id=? AND part=?", sessionId, part)!;
     return {
@@ -80,17 +82,20 @@ export function partConfig(sessionId: number) {
       attachment: attachmentInfo(sessionId, part, prefix),
       visibility: String(p.visibility),
       questions: questionsFor(sessionId, part),
+      entryTags: entryTagsFor(sessionId, part),
+      critiquePrompts: promptLists[part],
     };
   });
 }
 
 /** Use the same release and visibility rules for students and the read-only teacher preview. */
-export function studentPart(sessionId: number, part: number, entryTags: readonly string[], prefix = "/api/student") {
+export function studentPart(sessionId: number, part: number, prefix = "/api/student") {
   const p = get("SELECT * FROM session_parts WHERE session_id=? AND part=?", sessionId, part)!;
   const vis = String(p.visibility);
   if (vis === "hidden") return null;
   const base = { part, title: PART_TITLES[part], locked: vis !== "open" };
   if (base.locked) return base;
+  const entryTags = entryTagsFor(sessionId, part);
   return {
     ...base,
     instructions: String(p.instructions),
@@ -98,11 +103,16 @@ export function studentPart(sessionId: number, part: number, entryTags: readonly
     webLink: String(p.web_link),
     attachment: attachmentInfo(sessionId, part, prefix),
     questions: questionsFor(sessionId, part),
+    entryTags,
     ...(part === 1 && designHintsVisible(sessionId) ? { designTagHints: designHintsFor(sessionId).filter(({ tag }) => entryTags.includes(tag)) } : {}),
   };
 }
 
-export function entryTagsFor(sessionId: number): readonly string[] {
+export function entryTagsFor(sessionId: number, part?: number): readonly string[] {
+  if (part !== undefined) {
+    const stage = get("SELECT tags_json FROM stage_settings WHERE session_id=? AND part=?", sessionId, part);
+    if (stage?.tags_json != null) return JSON.parse(String(stage.tags_json)) as string[];
+  }
   const saved = get("SELECT tags_json FROM session_entry_tags WHERE session_id=?", sessionId);
   return saved ? JSON.parse(String(saved.tags_json)) as string[] : TAGS;
 }

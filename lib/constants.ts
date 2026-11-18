@@ -18,6 +18,7 @@ export type PeerReaction = "like" | "heart";
 export interface InstructionFile { name: string; size: number; url: string; previewUrl: string | null }
 export interface InstructionBlock { id: string; title: string; text: string; webLink: string; questions: string[]; attachment?: InstructionFile | null }
 export interface DesignTagHint { tag: string; hint: string }
+export interface CritiquePrompt { key: string; label: string; enabled: boolean }
 
 export const PART_TITLES: Record<number, string> = {
   1: "Part 1: Designing the Investigation",

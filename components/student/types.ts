@@ -29,6 +29,7 @@ export interface PartInfo {
   attachment?: InstructionFile | null;
   designTagHints?: DesignTagHint[];
   questions?: { id: number; text: string }[];
+  entryTags?: string[];
   submission?: Submission;
   individualSubmission?: Submission;
   entryCount?: number;

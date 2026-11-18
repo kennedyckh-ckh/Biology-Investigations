@@ -3,7 +3,7 @@ import { all, get, run, tx, now, num, audit, type Row } from "../db";
 import { requireTeacher, ownSession, ownGroup, mustBeActive, submissionInfo, individualSubmissionInfo, onlineEditors } from "../authz";
 import { createSession, partConfig, setQuestions, activeGroupIds, entryTagsFor, designHintsFor, designHintsVisible, instructionBlocksFor, studentPart } from "../sessions";
 import { entriesWhere, deleteImageFile } from "../entries";
-import { publishedShares, publishedAi, critiquePromptsOf, reactionsFor } from "../sharing";
+import { classBoardFor, publishedShares, publishedAi, critiquePromptsOf, stageCritiquePrompts, reactionsFor } from "../sharing";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS, DEFAULT_CRITIQUE_PROMPTS, type InstructionBlock } from "../constants";
 import { randomUUID } from "node:crypto";
 import { attachmentInfo, attachmentRow, downloadInstructionFile, receiveInstructionFile, removeInstructionFile, uploadsInProgress } from "../instruction-files";
@@ -113,9 +113,10 @@ route("PUT", "/teacher/sessions/:id/design-tag-hints/visibility", (ctx) => {
   return { visible };
 });
 
-route("PATCH", "/teacher/sessions/:id", (ctx) => {
+function updateSessionSettings(ctx: Ctx) {
   const s = ownSession(ctx, ctx.params.id);
   mustBeActive(s);
+  const part = ctx.params.n === undefined ? undefined : partNo(ctx.params.n);
   const b = ctx.body || {};
   const sid = num(s.id);
   let tags: string[] | undefined;
@@ -132,7 +133,8 @@ route("PATCH", "/teacher/sessions/:id", (ctx) => {
   if ("critiquePrompts" in b) {
     if (!Array.isArray(b.critiquePrompts) || b.critiquePrompts.length > LIMITS.critiquePromptCount) throw bad(`Use up to ${LIMITS.critiquePromptCount} critique prompts.`);
     const defaults = new Map(DEFAULT_CRITIQUE_PROMPTS.map((p) => [p.key, p.label]));
-    const currentLabels = new Map(critiquePromptsOf(s).map((p) => [p.key, p.label]));
+    const current = critiquePromptsOf(s, part);
+    const currentLabels = new Map(current.map((p) => [p.key, p.label]));
     const next = (b.critiquePrompts as unknown[]).map((value) => {
       if (!value || typeof value !== "object") throw bad("Invalid critique prompt");
       const p = value as { key?: unknown; label?: unknown; enabled?: unknown };
@@ -144,36 +146,50 @@ route("PATCH", "/teacher/sessions/:id", (ctx) => {
       if (!label) throw bad("Prompt label is required");
       return { key, label, enabled: !!p.enabled };
     });
-    if (new Set(next.map((prompt) => prompt.key)).size !== next.length) throw bad("Critique prompt keys must be unique.");
-    if (next.length) promptsJson = JSON.stringify(next);
+    const used = new Set(next.map((prompt) => prompt.key));
+    if (used.size !== next.length) throw bad("Critique prompt keys must be unique.");
+    if (part !== undefined) {
+      // Retain the labels linked to prior critiques even when a prompt is removed from the menu.
+      const retired = current.filter((p) => !used.has(p.key)).map((p) => ({ ...p, enabled: false }));
+      if (next.length + retired.length > LIMITS.critiquePromptCount) throw bad(`Use up to ${LIMITS.critiquePromptCount} critique prompts, including disabled prompts.`);
+      promptsJson = JSON.stringify([...next, ...retired]);
+    } else if (next.length) promptsJson = JSON.stringify(next);
   }
   let hintsJson: string | undefined;
   if ("designTagHints" in b) {
+    if (part !== undefined && part !== 1) throw bad("Design tag hints only apply to Part 1.");
     if (!Array.isArray(b.designTagHints) || b.designTagHints.length > LIMITS.entryTagCount) throw bad(`Use up to ${LIMITS.entryTagCount} design tag hints.`);
-    const validTags = tags ?? entryTagsFor(sid);
+    const validTags = tags ?? entryTagsFor(sid, 1);
     const next = (b.designTagHints as unknown[]).map((value) => {
       if (!value || typeof value !== "object") throw bad("Invalid design tag hint.");
       const hint = value as { tag?: unknown; hint?: unknown };
       const tag = str(hint.tag, LIMITS.entryTagMax, "Entry tag");
-      if (!validTags.includes(tag)) throw bad("Design hints must use a tag from this session.");
+      if (!validTags.includes(tag)) throw bad("Design hints must use a Part 1 entry tag.");
       return { tag, hint: str(hint.hint, LIMITS.designHintMax, "Design hint", { optional: true }) };
     });
     if (new Set(next.map((record) => record.tag)).size !== next.length) throw bad("Use one hint per tag.");
     hintsJson = JSON.stringify(next.filter((record) => record.hint));
   }
-  if ("title" in b) run("UPDATE sessions SET title=? WHERE id=?", str(b.title, 150, "Session title"), sid);
-  if ("anonymiseSharing" in b) run("UPDATE sessions SET anonymise_sharing=? WHERE id=?", b.anonymiseSharing ? 1 : 0, sid);
-  if ("aiCriteria" in b) run("UPDATE sessions SET ai_criteria=? WHERE id=?", str(b.aiCriteria, 2000, "AI criteria", { optional: true }), sid);
-  if (promptsJson !== undefined) run("UPDATE sessions SET critique_prompts_json=? WHERE id=?", promptsJson, sid);
-  if (tags !== undefined) {
-    run("INSERT INTO session_entry_tags(session_id,tags_json) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET tags_json=excluded.tags_json", sid, JSON.stringify(tags));
-  }
-  if (hintsJson !== undefined) {
-    run("INSERT INTO design_tag_hints(session_id,hints_json) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET hints_json=excluded.hints_json", sid, hintsJson);
-  }
-  audit("staff", ctx.auth.staff!.id, "session.update", `session:${sid}`);
+  tx(() => {
+    if (part !== undefined) {
+      if (tags !== undefined || promptsJson !== undefined) run(
+        "INSERT INTO stage_settings(session_id,part,tags_json,prompts_json) VALUES(?,?,?,?) ON CONFLICT(session_id,part) DO UPDATE SET tags_json=COALESCE(excluded.tags_json,tags_json),prompts_json=COALESCE(excluded.prompts_json,prompts_json)",
+        sid, part, tags === undefined ? null : JSON.stringify(tags), promptsJson ?? null,
+      );
+    } else {
+      if ("title" in b) run("UPDATE sessions SET title=? WHERE id=?", str(b.title, 150, "Session title"), sid);
+      if ("anonymiseSharing" in b) run("UPDATE sessions SET anonymise_sharing=? WHERE id=?", b.anonymiseSharing ? 1 : 0, sid);
+      if ("aiCriteria" in b) run("UPDATE sessions SET ai_criteria=? WHERE id=?", str(b.aiCriteria, 2000, "AI criteria", { optional: true }), sid);
+      if (promptsJson !== undefined) run("UPDATE sessions SET critique_prompts_json=? WHERE id=?", promptsJson, sid);
+      if (tags !== undefined) run("INSERT INTO session_entry_tags(session_id,tags_json) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET tags_json=excluded.tags_json", sid, JSON.stringify(tags));
+    }
+    if (hintsJson !== undefined) run("INSERT INTO design_tag_hints(session_id,hints_json) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET hints_json=excluded.hints_json", sid, hintsJson);
+    audit("staff", ctx.auth.staff!.id, part === undefined ? "session.update" : "stage.settings", `session:${sid}${part === undefined ? "" : `:part${part}`}`);
+  });
   return sessionDetail(ownSession(ctx, sid));
-});
+}
+route("PATCH", "/teacher/sessions/:id", updateSessionSettings);
+route("PATCH", "/teacher/sessions/:id/parts/:n/settings", updateSessionSettings);
 
 route("PUT", "/teacher/sessions/:id/parts/:n", (ctx) => {
   const s = ownSession(ctx, ctx.params.id);
@@ -300,12 +316,12 @@ route("GET", previewPath, (ctx) => {
   const entryTags = entryTagsFor(sid);
   return {
     title: s.title, archived: s.status !== "active", entryTags,
-    parts: [1, 2, 3].map((part) => studentPart(sid, part, entryTags, `/api/teacher/sessions/${sid}/student-view`)).filter(Boolean),
+    parts: [1, 2, 3].map((part) => studentPart(sid, part, `/api/teacher/sessions/${sid}/student-view`)).filter(Boolean),
   };
 });
 route("GET", `${previewPath}/class`, (ctx) => {
   const s = ownSession(ctx, ctx.params.id);
-  return { anonymised: !!num(s.anonymise_sharing), shares: publishedShares(s), ai: publishedAi(num(s.id)), prompts: critiquePromptsOf(s).filter((p) => p.enabled) };
+  return classBoardFor(s);
 });
 for (const suffix of ["/parts/:n/attachment", "/parts/:n/tasks/:taskId/attachment"]) {
   route("GET", `${previewPath}${suffix}`, (ctx) => {
@@ -440,7 +456,7 @@ route("GET", "/teacher/sessions/:id/status", (ctx) => {
   }));
   const recovery = all("SELECT r.id,r.created_at,s.name,s.class,s.class_no,g.name AS group_name FROM recovery_requests r JOIN students s ON s.id=r.student_id JOIN groups g ON g.id=s.group_id WHERE s.session_id=? AND r.approved_at IS NULL ORDER BY r.id", sid).map((r) => ({ id: num(r.id), name: r.name, class: r.class, classNo: r.class_no, group: r.group_name, createdAt: num(r.created_at) }));
   const overrides = all("SELECT part,reason,at,missing_groups_json FROM part_overrides WHERE session_id=? ORDER BY id DESC", sid).map((o) => ({ part: num(o.part), reason: o.reason, at: num(o.at), missing: JSON.parse(String(o.missing_groups_json)) }));
-  const tags = entryTagsFor(sid);
+  const tags = entryTagsFor(sid, 1);
   const designHintCount = designHintsFor(sid).filter(({ tag }) => tags.includes(tag)).length;
   return { status: s.status, designHintsVisible: designHintsVisible(sid), designHintCount, parts: partConfig(sid).map((p) => ({ part: p.part, title: PART_TITLES[p.part], visibility: p.visibility })), groups, summary, recovery, overrides };
 });
@@ -511,14 +527,14 @@ route("POST", "/teacher/sessions/:id/recovery/:rid/approve", (ctx) => {
 route("GET", "/teacher/sessions/:id/shares", (ctx) => {
   const s = ownSession(ctx, ctx.params.id);
   const sid = num(s.id);
-  const prompts = critiquePromptsOf(s);
+  const promptsByPart = stageCritiquePrompts(s);
   const rows = all("SELECT * FROM shares WHERE session_id=? ORDER BY seq", sid).map((sh) => {
     const e = entriesWhere("e.id=?", num(sh.entry_id))[0];
     if (!e) return null;
     const group = String(get("SELECT name FROM groups WHERE id=?", e.groupId)!.name);
     const critiques = all("SELECT * FROM critiques WHERE share_id=? ORDER BY id", num(sh.id)).map((c) => {
       const st = get("SELECT name,class,class_no FROM students WHERE id=?", num(c.student_id))!;
-      return { id: num(c.id), promptLabel: prompts.find((p) => p.key === c.prompt_key)?.label || String(c.prompt_key), body: c.body, hidden: !!num(c.hidden), author: `${st.name} (${st.class}/${st.class_no})` };
+      return { id: num(c.id), promptLabel: promptsByPart[e.part]?.find((p) => p.key === c.prompt_key)?.label || String(c.prompt_key), body: c.body, hidden: !!num(c.hidden), author: `${st.name} (${st.class}/${st.class_no})` };
     });
     return { shareId: num(sh.id), seq: num(sh.seq), publishedAt: num(sh.published_at), entry: e, groupName: group, publicLabel: num(s.anonymise_sharing) ? `Sample Response #${num(sh.seq)}` : group, critiques, reactions: reactionsFor(num(sh.id)) };
   });
@@ -622,7 +638,7 @@ route("GET", "/teacher/sessions/:id/export", (ctx) => {
   let type: string;
   if (fmt === "json") {
     payload = JSON.stringify(
-      { session: { id: sid, title: s.title, exportedAt: new Date().toISOString() }, stages: parts.map((p) => ({ part: p.part, label: PART_TITLES[p.part], instructions: p.instructions, instructionBlocks: p.instructionBlocks, webLink: p.webLink, guidingQuestions: p.questions.map((q) => q.text) })), entries, aiOutputs: ai },
+      { session: { id: sid, title: s.title, exportedAt: new Date().toISOString() }, stages: parts.map((p) => ({ part: p.part, label: PART_TITLES[p.part], instructions: p.instructions, instructionBlocks: p.instructionBlocks, webLink: p.webLink, guidingQuestions: p.questions.map((q) => q.text), entryTags: p.entryTags, critiquePrompts: p.critiquePrompts })), entries, aiOutputs: ai },
       null,
       2
     );

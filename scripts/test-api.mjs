@@ -492,6 +492,66 @@ async function main() {
   eq("the duplicate cannot edit the original student's work", (await api(duplicate, "PATCH", `/student/entries/${e1.id}`, { body: "wrong student" })).status, 404);
   eq("recovery refuses ambiguous identical details without a group", (await join(actor("ambiguous"), "Alice Lee", "1", "auto", undefined, true)).json?.error, "ambiguous_recovery");
 
+  section("Stage-specific entry tags and critique prompts");
+  const stageSession = (await api(t1, "POST", "/teacher/sessions", { title: "Stage settings fixture" })).json.id;
+  const stageBase = `/teacher/sessions/${stageSession}`;
+  const stagePath = (part) => `${stageBase}/parts/${part}/settings`;
+  const legacyPrompt = { key: "legacy-inquiry", label: "Legacy inquiry prompt", enabled: true };
+  const sharedTag = "Original session tag";
+  eq("legacy session settings remain a fallback", (await api(t1, "PATCH", stageBase, { entryTags: [sharedTag], critiquePrompts: [legacyPrompt] })).status, 200);
+  const inherited = (await api(t1, "GET", stageBase)).json;
+  check("untouched stages inherit the former session settings", inherited.parts.every((p) => p.entryTags[0] === sharedTag && p.critiquePrompts[0].key === legacyPrompt.key));
+  const stageTags = ["Design decision", "Measurement", "Evidence claim"];
+  const stagePrompts = [
+    { key: "shared-key", label: "Challenge the design", enabled: true },
+    { key: "shared-key", label: "Check a measurement", enabled: true },
+    { key: "reflect-only", label: "Evaluate the evidence", enabled: true },
+  ];
+  eq("another teacher cannot edit stage settings", (await api(t2, "PATCH", stagePath(1), { entryTags: stageTags })).status, 404);
+  eq("students cannot edit stage settings", (await api(s1, "PATCH", stagePath(1), { entryTags: stageTags })).status, 401);
+  eq("duplicate tags rejected in a stage", (await api(t1, "PATCH", stagePath(1), { entryTags: ["Tag", "tag"] })).status, 400);
+  eq("design hints cannot be authored in Part 2", (await api(t1, "PATCH", stagePath(2), { designTagHints: [] })).status, 400);
+  eq("owner can set Part 1 tags and its design hint", (await api(t1, "PATCH", stagePath(1), { entryTags: [stageTags[0]], critiquePrompts: [stagePrompts[0]], designTagHints: [{ tag: stageTags[0], hint: "Explain why you chose this design." }] })).status, 200);
+  eq("owner can set independent Part 2 tags and prompts", (await api(t1, "PATCH", stagePath(2), { entryTags: [stageTags[1]], critiquePrompts: [stagePrompts[1]] })).status, 200);
+  eq("owner can set independent Part 3 tags and prompts", (await api(t1, "PATCH", stagePath(3), { entryTags: [stageTags[2]], critiquePrompts: [stagePrompts[2]] })).status, 200);
+  const updated = (await api(t1, "GET", stageBase)).json;
+  check("teacher sees separate settings for all three stages", updated.parts.every((p, i) => p.entryTags[0] === stageTags[i] && p.critiquePrompts[0].label === stagePrompts[i].label));
+  eq("Part 1 live monitor counts hints for its stage-specific tags", (await api(t1, "GET", `${stageBase}/status`)).json.designHintCount, 1);
+  for (const part of [2, 3]) eq(`open Part ${part} before students join`, (await api(t1, "POST", `${stageBase}/parts/${part}/visibility`, { visibility: "open" })).status, 200);
+  const writer = actor("stage writer"), critic = actor("stage critic");
+  for (const [i, who] of [writer, critic].entries()) {
+    eq(`stage fixture student ${i + 1} joins`, (await api(who, "POST", "/student/join", { code: updated.joinCode, name: `Fixture student ${i + 1}`, class: "8B", classNo: `${i + 1}`, groupId: updated.groups[i].id })).status, 200);
+  }
+  const writerState = (await api(writer, "GET", "/student/state")).json;
+  check("student receives the stage tags on each open part", writerState.parts.every((p, i) => p.entryTags.join() === stageTags[i]));
+  check("Part 1 hints remain withheld on the student state", !writerState.parts[0].designTagHints);
+  await api(t1, "PUT", `${stageBase}/design-tag-hints/visibility`, { visible: true });
+  eq("release makes the stage-specific Design hint readable", (await api(writer, "GET", "/student/state")).json.parts[0].designTagHints[0].tag, stageTags[0]);
+  const stagedEntries = [];
+  for (const part of [1, 2, 3]) {
+    const made = await api(writer, "POST", "/student/entries", { part, tag: stageTags[part - 1], body: `Stage ${part} response.` });
+    eq(`Part ${part} accepts its own tag`, made.status, 200);
+    stagedEntries.push(made.json.entry.id);
+  }
+  eq("cannot create an entry with another stage's tag", (await api(writer, "POST", "/student/entries", { part: 2, tag: stageTags[0], body: "Wrong tag." })).status, 400);
+  eq("cannot update an entry to another stage's tag", (await api(writer, "PATCH", `/student/entries/${stagedEntries[1]}`, { tag: stageTags[0] })).status, 400);
+  eq("teacher shares one response from each stage", (await api(t1, "POST", `${stageBase}/shares`, { entryIds: stagedEntries })).json.added, 3);
+  const stageBoard = (await api(critic, "GET", "/student/class")).json;
+  check("class board sends only enabled prompts per response stage", stageBoard.shares.every(({ part }) => stageBoard.promptsByPart[part].map((p) => p.label).join() === stagePrompts[part - 1].label));
+  const sendCritique = (shareId, promptKey) => api(critic, "POST", "/student/critiques", { shareId, promptKey, body: "A stage-specific critique." });
+  eq("cannot post a critique meant for a different stage", (await sendCritique(stageBoard.shares[0].shareId, stagePrompts[2].key)).status, 400);
+  eq("same prompt key is accepted and labelled independently in each stage", (await sendCritique(stageBoard.shares[0].shareId, "shared-key")).status, 200);
+  eq("second stage accepts its version of the prompt", (await sendCritique(stageBoard.shares[1].shareId, "shared-key")).status, 200);
+  eq("can turn off all prompts in one stage without deleting historical labels", (await api(t1, "PATCH", stagePath(1), { critiquePrompts: [] })).status, 200);
+  const afterStageBoard = (await api(critic, "GET", "/student/class")).json;
+  check("stage prompt disabling preserves both existing critique labels", afterStageBoard.promptsByPart[1].length === 0 && afterStageBoard.shares[0].critiques[0].promptLabel === stagePrompts[0].label && afterStageBoard.shares[1].critiques[0].promptLabel === stagePrompts[1].label);
+  const stageProjector = (await api(t1, "GET", `${stageBase}/projector`)).json;
+  eq("projector uses the work's own stage prompt label", stageProjector.shares[1].critiques[0].promptLabel, stagePrompts[1].label);
+  const stagePreview = (await api(t1, "GET", `${stageBase}/student-view`)).json;
+  eq("Student view uses the same stage-specific entry tags", stagePreview.parts[1].entryTags[0], stageTags[1]);
+  const stageExport = (await api(t1, "GET", `${stageBase}/export?format=json`)).json;
+  check("JSON export includes tags and critique prompts for each stage", stageExport.stages[2].entryTags[0] === stageTags[2] && stageExport.stages[2].critiquePrompts[0].label === stagePrompts[2].label);
+
   section("Archive & delete");
   eq("cannot delete an active session", (await api(t1, "DELETE", `/teacher/sessions/${sid}`, { confirmTitle: "Period 3 Investigation" })).status, 403);
   eq("teacher archives", (await api(t1, "POST", `/teacher/sessions/${sid}/archive`)).status, 200);
