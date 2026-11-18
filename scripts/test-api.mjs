@@ -135,6 +135,21 @@ async function main() {
   eq("second student joins group A", (await join(s2, "Bob Tam", "2", gA)).status, 200);
   eq("student joins group B", (await join(s3, "Cara Ng", "3", gB)).status, 200);
   const sessionBase = `/teacher/sessions/${sid}`;
+  section("Ordered instruction blocks");
+  const partEdit = { instructions: "CUSTOMISED by teacher", webLink: "https://example.org/p1", questions: ["Custom Q1", "Custom Q2"] };
+  const blocks = [{ title: "Predict", text: "Record a prediction." }, { title: "", text: "Explain your reasoning." }];
+  eq("existing part starts with no task blocks", (await api(t1, "GET", sessionBase)).json.parts[0].instructionBlocks.length, 0);
+  eq("another teacher cannot add blocks", (await api(t2, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: blocks })).status, 404);
+  eq("teacher saves ordered task blocks", (await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: blocks })).status, 200);
+  eq("teacher cannot save a blank block", (await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: [{ title: "Empty", text: " " }] })).status, 400);
+  eq("too many blocks rejected", (await api(t1, "PUT", `${sessionBase}/parts/1`, { ...partEdit, instructionBlocks: Array(13).fill(blocks[0]) })).status, 400);
+  eq("an older client can save instructions without removing the blocks", (await api(t1, "PUT", `${sessionBase}/parts/1`, partEdit)).status, 200);
+  eq("teacher can prepare blocks for a locked part", (await api(t1, "PUT", `${sessionBase}/parts/2`, { ...partEdit, instructionBlocks: blocks })).status, 200);
+  const tasksState = (await api(s1, "GET", "/student/state")).json;
+  eq("students receive ordered blocks only for the open part", JSON.stringify(tasksState.parts[0].instructionBlocks), JSON.stringify(blocks));
+  eq("students still receive the existing overview", tasksState.parts[0].instructions, partEdit.instructions);
+  check("locked parts do not expose task blocks", !("instructionBlocks" in tasksState.parts[1]));
+  eq("teacher can clear the task blocks explicitly", (await api(t1, "PUT", `${sessionBase}/parts/2`, { ...partEdit, instructionBlocks: [] })).json.parts[1].instructionBlocks.length, 0);
   const upload = async (who, part, text, name = "Class guide.pdf") => fetch(`${BASE}/api${sessionBase}/parts/${part}/attachment`, {
     method: "PUT",
     headers: { Cookie: Object.entries(who.cookies).map(([k, v]) => `${k}=${v}`).join("; "), "Content-Type": "application/octet-stream", "X-Instruction-Filename": encodeURIComponent(name) },
@@ -152,10 +167,26 @@ async function main() {
   const attachment = await api(s1, "GET", "/student/parts/1/attachment");
   eq("student downloads exact attachment contents", attachment.text, "Class guide");
   check("file is forced to download", attachment.headers.get("content-disposition")?.startsWith("attachment;"));
+  eq("non-image preview request is rejected", (await api(s1, "GET", "/student/parts/1/attachment?preview=1")).status, 415);
   eq("invalid replacement leaves original file in place", (await upload(t1, 1, "")).status, 400);
   eq("original still downloads", (await api(s1, "GET", "/student/parts/1/attachment")).text, "Class guide");
   eq("new upload replaces the single attachment", (await upload(t1, 1, "New version", "Revised guide.txt")).status, 200);
   eq("student downloads replacement", (await api(s1, "GET", "/student/parts/1/attachment")).text, "New version");
+  const pngBytes = Buffer.from(PNG.split(",")[1], "base64");
+  eq("teacher uploads a diagram", (await upload(t1, 1, pngBytes, "Cell diagram.png")).status, 200);
+  eq("teacher uploads a diagram before Part 2 opens", (await upload(t1, 2, pngBytes, "Hidden diagram.png")).status, 200);
+  const diagramMeta = (await api(s1, "GET", "/student/state")).json.parts[0].attachment;
+  check("open part has an inline image URL", diagramMeta.previewUrl?.startsWith("/api/student/parts/1/attachment?preview=1"));
+  const diagram = await fetch(BASE + diagramMeta.previewUrl, { headers: { Cookie: Object.entries(s1.cookies).map(([k, v]) => `${k}=${v}`).join("; ") } });
+  check("image streams inline with its detected MIME and exact bytes", diagram.ok
+    && diagram.headers.get("content-type") === "image/png"
+    && diagram.headers.get("content-disposition")?.startsWith("inline;")
+    && Buffer.from(await diagram.arrayBuffer()).equals(pngBytes));
+  eq("students cannot preview a locked diagram", (await api(s1, "GET", "/student/parts/2/attachment?preview=1")).status, 403);
+  eq("anonymous visitors cannot preview a diagram", (await api(anon, "GET", "/student/parts/1/attachment?preview=1")).status, 401);
+  eq("teacher can also request an inline preview", (await api(t1, "GET", `${sessionBase}/parts/1/attachment?preview=1`)).headers.get("content-type"), "image/png");
+  eq("teacher can replace the diagram with another file", (await upload(t1, 1, "Plain text", "Not an image.png")).status, 200);
+  eq("file named PNG without an image signature remains a download", (await api(s1, "GET", "/student/state")).json.parts[0].attachment.previewUrl, null);
   eq("teacher removes file", (await api(t1, "DELETE", `${sessionBase}/parts/1/attachment`)).status, 200);
   eq("removed file cannot be downloaded", (await api(s1, "GET", "/student/parts/1/attachment")).status, 404);
   section("Session-specific entry tags");
@@ -199,6 +230,7 @@ async function main() {
   eq("wrong teacher cannot configure design hints", (await api(t2, "PATCH", sessionBase, { designTagHints: designHint })).status, 404);
   eq("design hint must belong to a configured tag", (await api(t1, "PATCH", sessionBase, { designTagHints: [{ tag: "Not a tag", hint: "Example" }] })).status, 400);
   eq("teacher saves design hints", (await api(t1, "PATCH", sessionBase, { designTagHints: designHint })).status, 200);
+  eq("live monitor reports how many saved hints can be released", (await api(t1, "GET", `${sessionBase}/status`)).json.designHintCount, 1);
   state = (await api(s1, "GET", "/student/state")).json;
   check("saved design hints stay hidden until released", !("designTagHints" in state.parts[0]));
   const hintVisibility = `${sessionBase}/design-tag-hints/visibility`;
@@ -398,6 +430,7 @@ async function main() {
   check("CSV has student name/class/class no/tag/stage", /Alice Lee/.test(csv.text) && /"8A"/.test(csv.text) && /Hypothesis/.test(csv.text) && /Part 1: Designing/.test(csv.text));
   check("CSV neutralises spreadsheet formulas", csv.text.includes("\"'=HYPERLINK"));
   const js = (await api(t1, "GET", `/teacher/sessions/${sid}/export?format=json`)).json;
+  eq("JSON export includes the ordered task blocks", JSON.stringify(js.stages[0].instructionBlocks), JSON.stringify(blocks));
   check("JSON export has stages, questions and entries", js.stages.length === 3 && js.stages[0].guidingQuestions[0] === "Custom Q1" && js.entries.length >= 4);
   eq("other teacher cannot export", (await api(t2, "GET", `/teacher/sessions/${sid}/export?format=json`)).status, 404);
   eq("educator cannot export", (await api(ed, "GET", `/teacher/sessions/${sid}/export?format=json`)).status, 403);

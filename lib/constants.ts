@@ -15,7 +15,8 @@ export const TAGS = [
 ] as const;
 export type Tag = (typeof TAGS)[number];
 export type PeerReaction = "like" | "heart";
-export interface InstructionFile { name: string; size: number; url: string }
+export interface InstructionFile { name: string; size: number; url: string; previewUrl: string | null }
+export interface InstructionBlock { title: string; text: string }
 export interface DesignTagHint { tag: string; hint: string }
 
 export const PART_TITLES: Record<number, string> = {
@@ -46,6 +47,9 @@ export const LIMITS = {
   critiqueLabelMax: 120,
   critiquePromptCount: 20,
   instructionFileBytes: 500_000_000,
+  instructionBlockCount: 12,
+  instructionTitleMax: 120,
+  instructionTextMax: 5000,
   entryTagMax: 60,
   entryTagCount: 30,
   designHintMax: 500,

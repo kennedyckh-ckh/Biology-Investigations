@@ -125,6 +125,13 @@ CREATE TABLE IF NOT EXISTS instruction_attachments(
   PRIMARY KEY(session_id, part),
   FOREIGN KEY(session_id, part) REFERENCES session_parts(session_id, part) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS part_instruction_blocks(
+  session_id INTEGER NOT NULL,
+  part INTEGER NOT NULL,
+  blocks_json TEXT NOT NULL,
+  PRIMARY KEY(session_id, part),
+  FOREIGN KEY(session_id, part) REFERENCES session_parts(session_id, part) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS groups(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

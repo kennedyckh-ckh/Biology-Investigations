@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/client/api";
 import { Field, useToast } from "@/components/ui";
 import { LIMITS, PART_TITLES, TAGS, type InstructionFile } from "@/lib/constants";
+import { partIcon, WorkspaceHeading } from "@/components/workspace-icon";
 import type { SessionDetail, PartCfg } from "./types";
 
 export function Setup({ session, onSaved }: { session: SessionDetail; onSaved: () => void }) {
@@ -115,9 +116,9 @@ function SessionSettings({ session, onSaved, disabled }: { session: SessionDetai
         </div>
       </details>
       <details className="rounded-lg border border-slate-200 p-3">
-        <summary className="cursor-pointer text-sm font-semibold">Design tag hints</summary>
+        <summary className="cursor-pointer text-sm font-semibold text-blue-900">Design entry-tag hints</summary>
         <div className="mt-3 space-y-3">
-          <p className="text-sm text-slate-600">Write a short definition, example or question. These stay hidden until you click “Show design tag hints” in the Live monitor.</p>
+          <p className="text-sm text-slate-600">Write a short definition, example or question, then save your settings. {session.designHintsVisible ? "Hints are released. Students can open them while Part 1 is open. To hide them, go to Live monitor." : "To release the saved hints, click “Show design tag hints” in Live monitor."}</p>
           {activeHintTag ? (
             <>
               <Field label="Choose a tag">
@@ -205,7 +206,7 @@ function InstructionAttachment({ sessionId, part, initial, onSaved, disabled }: 
   return (
     <fieldset className="space-y-2">
       <legend className="label">Instruction file</legend>
-      <p className="text-xs text-slate-500">One file per part, up to 500 MB. Students can download it once this part is open.</p>
+      <p className="text-xs text-slate-600">One shared file per part, up to 500 MB. PNG, JPEG, WebP and GIF images display directly on the student page when the part opens. Other files are available to download.</p>
       {initial && <p className="text-sm"><a className="break-all text-blue-700 underline" href={initial.url} download>{initial.name}</a> <span className="text-slate-500">({(initial.size / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MB)</span></p>}
       {!disabled && (
         <div className="flex flex-wrap items-center gap-2">
@@ -229,6 +230,7 @@ function InstructionAttachment({ sessionId, part, initial, onSaved, disabled }: 
 function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; cfg: PartCfg; onSaved: () => void; disabled: boolean }) {
   const toast = useToast();
   const [instructions, setInstructions] = useState(cfg.instructions);
+  const [blocks, setBlocks] = useState(cfg.instructionBlocks);
   const [link, setLink] = useState(cfg.webLink);
   const [qs, setQs] = useState<string[]>(cfg.questions.map((q) => q.text));
   const [busy, setBusy] = useState(false);
@@ -236,6 +238,7 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
   useEffect(() => {
     if (!dirty) {
       setInstructions(cfg.instructions);
+      setBlocks(cfg.instructionBlocks);
       setLink(cfg.webLink);
       setQs(cfg.questions.map((q) => q.text));
     }
@@ -247,7 +250,7 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
   async function save() {
     setBusy(true);
     try {
-      await api("PUT", `/teacher/sessions/${sessionId}/parts/${cfg.part}`, { instructions, webLink: link, questions: qs.filter((q) => q.trim()) });
+      await api("PUT", `/teacher/sessions/${sessionId}/parts/${cfg.part}`, { instructions, instructionBlocks: blocks, webLink: link, questions: qs.filter((q) => q.trim()) });
       setDirty(false);
       toast(`Part ${cfg.part} saved`);
       onSaved();
@@ -267,12 +270,43 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
   return (
     <section className="card space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-bold">{PART_TITLES[cfg.part]}</h3>
+        <WorkspaceHeading icon={partIcon(cfg.part)}>{PART_TITLES[cfg.part]}</WorkspaceHeading>
         {dirty && <span className="badge bg-amber-100 text-amber-800">Unsaved changes</span>}
       </div>
-      <Field label="Instructions for students">
-        <textarea className="input min-h-[110px]" value={instructions} onChange={(e) => touch(setInstructions)(e.target.value)} disabled={disabled} maxLength={5000} />
+      <Field label="Part overview" hint="Optional. Students see this before the numbered tasks.">
+        <textarea className="input min-h-[110px]" value={instructions} onChange={(e) => touch(setInstructions)(e.target.value)} disabled={disabled || busy} maxLength={LIMITS.instructionTextMax} />
       </Field>
+      <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 sm:p-4">
+        <WorkspaceHeading as="h4" icon="task">Task instruction blocks</WorkspaceHeading>
+        <p className="text-xs text-slate-600">Add separate tasks and arrange them in the order students should follow.</p>
+        <ol className="space-y-3">
+          {blocks.map((block, i) => (
+            <li key={i} className="space-y-3 rounded-lg border border-blue-100 bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="badge bg-blue-100 text-blue-900">Task {i + 1}</span>
+                <div className="flex flex-wrap gap-1">
+                  {([-1, 1] as const).map((d) => (
+                    <button key={d} type="button" className="btn-ghost btn-sm" aria-label={`Move task ${i + 1} ${d < 0 ? "up" : "down"}`} disabled={disabled || busy || !blocks[i + d]} onClick={() => {
+                      const next = blocks.slice();
+                      [next[i], next[i + d]] = [next[i + d], next[i]];
+                      touch(setBlocks)(next);
+                    }}>{d < 0 ? "↑" : "↓"}</button>
+                  ))}
+                  <button type="button" className="btn-ghost btn-sm text-rose-700" aria-label={`Remove task ${i + 1}`} disabled={disabled || busy} onClick={() => touch(setBlocks)(blocks.filter((_, j) => j !== i))}>Remove</button>
+                </div>
+              </div>
+              <Field label="Task heading (optional)">
+                <input className="input" aria-label={`Task ${i + 1} heading`} value={block.title} disabled={disabled || busy} maxLength={LIMITS.instructionTitleMax} onChange={(e) => touch(setBlocks)(blocks.map((b, j) => j === i ? { ...b, title: e.target.value } : b))} />
+              </Field>
+              <Field label="Task instructions">
+                <textarea className="input min-h-24" aria-label={`Task ${i + 1} instructions`} value={block.text} disabled={disabled || busy} maxLength={LIMITS.instructionTextMax} onChange={(e) => touch(setBlocks)(blocks.map((b, j) => j === i ? { ...b, text: e.target.value } : b))} />
+              </Field>
+            </li>
+          ))}
+        </ol>
+        <button type="button" className="btn-ghost btn-sm" disabled={disabled || busy || blocks.length >= LIMITS.instructionBlockCount} onClick={() => touch(setBlocks)([...blocks, { title: "", text: "" }])}>+ Add task block</button>
+        {blocks.some((b) => !b.text.trim()) && <p className="text-xs text-slate-600">Fill in the instructions for every task or remove blank tasks before saving.</p>}
+      </div>
       <Field label="External web link" hint="Opens in a new tab for students. Must start with http:// or https://">
         <input className="input" value={link} onChange={(e) => touch(setLink)(e.target.value)} disabled={disabled} placeholder="https://…" maxLength={500} />
       </Field>
@@ -300,7 +334,7 @@ function PartEditor({ sessionId, cfg, onSaved, disabled }: { sessionId: number; 
           + Add question
         </button>
       </div>
-      <button className="btn-primary" disabled={busy || disabled || !dirty} onClick={save}>
+      <button className="btn-primary" disabled={busy || disabled || !dirty || blocks.some((b) => !b.text.trim())} onClick={save}>
         {busy ? "Saving…" : `Save Part ${cfg.part}`}
       </button>
     </section>

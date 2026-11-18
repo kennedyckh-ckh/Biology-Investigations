@@ -158,10 +158,10 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
               <p className="mt-2 text-xs text-slate-500">{VIS.find((o) => o.v === p.visibility)?.hint}</p>
               {p.part === 1 && (
                 <div className="mt-3 border-t border-slate-200 pt-3">
-                  <button className="btn-ghost btn-sm" disabled={busy || archived} onClick={() => toggleHints(!data.designHintsVisible)}>
+                  <button className="btn-ghost btn-sm" disabled={busy || archived || (!data.designHintsVisible && !data.designHintCount)} onClick={() => toggleHints(!data.designHintsVisible)}>
                     {data.designHintsVisible ? "Hide design tag hints" : "Show design tag hints"}
                   </button>
-                  <p className="mt-1 text-xs text-slate-600">{data.designHintsVisible ? "Students can see the panel while Part 1 is open." : "Students cannot see the hint panel."}</p>
+                  <p className="mt-1 text-xs text-slate-600">{!data.designHintCount ? "Write and save at least one Design entry-tag hint in Setup." : data.designHintsVisible ? (p.visibility === "open" ? "Students can open the hints next to Group entries." : "Hints are released and will be available when Part 1 opens.") : `${data.designHintCount} saved ${data.designHintCount === 1 ? "hint" : "hints"}. Students cannot read them until you release them.`}</p>
                 </div>
               )}
             </div>

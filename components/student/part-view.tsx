@@ -1,7 +1,9 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, usePoll, fmtTime, ApiError } from "@/lib/client/api";
 import { EntryBody, TagBadge, Modal, Spinner, ErrorBox, Empty, useToast, type TableData } from "@/components/ui";
+import { partIcon, WorkspaceHeading, WorkspaceIcon } from "@/components/workspace-icon";
+import type { DesignTagHint, InstructionFile } from "@/lib/constants";
 import { EntryEditor, draftStorage } from "./entry-editor";
 import type { Entry, PartInfo, SaveStatus, Submission } from "./types";
 
@@ -16,12 +18,56 @@ function GuidingQuestions({ qs }: { qs: { id: number; text: string }[] }) {
   if (!qs.length) return null;
   return (
     <div className="mt-4 rounded-xl bg-violet-50 p-4">
-      <h4 className="mb-2 text-sm font-bold text-violet-900">Guiding questions</h4>
-      <ol className="list-decimal space-y-1.5 pl-5 text-sm text-violet-950">
+      <WorkspaceHeading as="h4" icon="question">Guiding questions</WorkspaceHeading>
+      <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-violet-950">
         {qs.map((q) => (
           <li key={q.id}>{q.text}</li>
         ))}
       </ol>
+    </div>
+  );
+}
+
+function InstructionResource({ file }: { file: InstructionFile }) {
+  const [failed, setFailed] = useState(false);
+  if (!file.previewUrl) return (
+    <a className="btn-ghost btn-sm mt-3 max-w-full break-all" href={file.url} download>
+      <WorkspaceIcon name="task" /> Download instruction file: {file.name}
+    </a>
+  );
+  return (
+    <figure className="mt-4 space-y-2 rounded-xl border border-blue-100 bg-blue-50/70 p-3 sm:p-4">
+      <WorkspaceHeading as="h4" icon="diagram">Instruction diagram</WorkspaceHeading>
+      {failed ? <p role="status" className="text-sm text-slate-700">This diagram could not be displayed. Ask your teacher to check the image, or reload the page to try again.</p>
+        // The image is authenticated with the student cookie, so it must load directly in the browser.
+        // eslint-disable-next-line @next/next/no-img-element
+        : <img src={file.previewUrl} alt={`Teacher-provided instruction diagram: ${file.name}`} decoding="async" className="mx-auto block h-auto max-h-[36rem] w-auto max-w-full rounded-md object-contain" onError={() => setFailed(true)} />}
+      <figcaption className="break-words text-xs text-slate-600">{file.name}</figcaption>
+    </figure>
+  );
+}
+
+function EntryTagHelp({ hints }: { hints: DesignTagHint[] }) {
+  const [open, setOpen] = useState(false);
+  const [selectedTag, setSelectedTag] = useState("");
+  const panelId = useId();
+  const selectId = useId();
+  const selected = hints.find(({ tag }) => tag === selectedTag) ?? hints[0];
+  return (
+    <div className="flex w-full flex-wrap items-center justify-between gap-2">
+      <WorkspaceHeading icon="entries">Group entries</WorkspaceHeading>
+      <button type="button" className="btn-ghost btn-sm" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>
+        <WorkspaceIcon name="question" /> {open ? "Hide entry-tag hints" : "Entry-tag hints"}
+      </button>
+      <div id={panelId} hidden={!open} className="w-full rounded-xl border border-blue-200 bg-blue-50 p-3 sm:p-4">
+        {selected ? <>
+          <label htmlFor={selectId} className="label">Choose an entry tag</label>
+          <select id={selectId} className="input max-w-xs" value={selected.tag} onChange={(e) => setSelectedTag(e.target.value)}>
+            {hints.map(({ tag }) => <option key={tag}>{tag}</option>)}
+          </select>
+          <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-blue-950" aria-live="polite">{selected.hint}</p>
+        </> : <p role="status" className="text-sm text-slate-700">Your teacher has not shared any entry-tag hints yet.</p>}
+      </div>
     </div>
   );
 }
@@ -140,10 +186,7 @@ export function PartView({ info, entryTags, studentId, active, onChanged }: { in
   if (info.locked)
     return (
       <div className="card flex flex-col items-center gap-3 py-16 text-center">
-        <span className="text-4xl" aria-hidden>
-          🔒
-        </span>
-        <h3 className="text-lg font-bold">{info.title}</h3>
+        <WorkspaceHeading icon="lock">{info.title}</WorkspaceHeading>
         <p className="max-w-md text-sm text-slate-600">This part is locked. Your teacher will unlock it when the class is ready. This page checks automatically.</p>
       </div>
     );
@@ -154,32 +197,30 @@ export function PartView({ info, entryTags, studentId, active, onChanged }: { in
   return (
     <div className="space-y-5">
       <div className="card">
-        <h3 className="text-lg font-bold">{info.title}</h3>
-        {info.instructions ? <p className="mt-2 whitespace-pre-wrap text-[15px] leading-relaxed text-slate-700">{info.instructions}</p> : <p className="mt-2 text-sm italic text-slate-400">No instructions yet.</p>}
+        <WorkspaceHeading icon={partIcon(info.part)}>{info.title}</WorkspaceHeading>
+        {info.instructions && <p className="mt-2 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-slate-700">{info.instructions}</p>}
+        {!!info.instructionBlocks?.length && (
+          <div className="mt-4 space-y-3">
+            <WorkspaceHeading as="h4" icon="task">Tasks</WorkspaceHeading>
+            <ol className="space-y-2">
+              {info.instructionBlocks.map(({ title, text }, i) => (
+                <li key={i} className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 sm:p-4">
+                  <h5 className="break-words text-sm font-semibold text-blue-950">Task {i + 1}{title ? `: ${title}` : ""}</h5>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{text}</p>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+        {!info.instructions && !info.instructionBlocks?.length && !info.attachment && !info.webLink && !info.questions?.length && <p className="mt-2 text-sm text-slate-600">No instructions yet.</p>}
         {info.webLink && (
           <a href={info.webLink} target="_blank" rel="noopener noreferrer" className="btn-ghost btn-sm mt-3">
-            🔗 Open the web resource <span className="font-normal text-slate-400">(new tab)</span>
+            <WorkspaceIcon name="link" /> Open the web resource <span className="font-normal text-slate-600">(new tab)</span>
           </a>
         )}
-        {info.attachment && <div className="mt-3"><a className="btn-ghost btn-sm max-w-full break-all" href={info.attachment.url} download>Download instruction file: {info.attachment.name}</a></div>}
+        {info.attachment && <InstructionResource key={info.attachment.previewUrl ?? info.attachment.name} file={info.attachment} />}
         <GuidingQuestions qs={info.questions ?? []} />
       </div>
-
-      {info.part === 1 && info.designTagHints !== undefined && (
-        <details className="card">
-          <summary className="cursor-pointer font-semibold text-blue-900">Design tag hints</summary>
-          {info.designTagHints?.length ? (
-            <div className="mt-3 space-y-2">
-              {info.designTagHints.map(({ tag, hint }) => (
-                <details key={tag} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <summary className="cursor-pointer py-1 text-sm font-semibold">{tag}</summary>
-                  <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{hint}</p>
-                </details>
-              ))}
-            </div>
-          ) : <p className="mt-2 text-sm text-slate-600">Your teacher has not added any tag hints yet.</p>}
-        </details>
-      )}
 
       {sub.status === "submitted" && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900" role="status">
@@ -198,6 +239,11 @@ export function PartView({ info, entryTags, studentId, active, onChanged }: { in
         </div>
       )}
 
+      <div className="rounded-xl border border-blue-100 bg-white p-3">
+        {info.part === 1
+          ? <EntryTagHelp hints={info.designTagHints ?? []} />
+          : <WorkspaceHeading icon="entries">Group entries</WorkspaceHeading>}
+      </div>
       {error && !data && <ErrorBox message={error.message} onRetry={refresh} />}
       {error && data && <div className="rounded-lg bg-amber-50 p-2 text-center text-xs text-amber-800">Connection problem – showing the last update. Your own typing is still being kept safe.</div>}
       {loading && !data && <Spinner label="Loading your group’s entries…" />}
