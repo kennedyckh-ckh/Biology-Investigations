@@ -1,7 +1,7 @@
 import { route, bad, forbidden, notFound, HttpError, str, int, partNo, safeLink, type Ctx } from "../router";
 import { all, get, run, tx, now, num, audit, type Row } from "../db";
-import { requireTeacher, ownSession, ownGroup, mustBeActive, submissionInfo, individualSubmissionInfo, onlineEditors } from "../authz";
-import { createSession, cloneSession, partConfig, setQuestions, activeGroupIds, entryTagsFor, designHintsFor, designHintsVisible, instructionBlocksFor, studentPart, saveTagHints, setTagHintsVisible, tagHintsFor, tagHintsVisible } from "../sessions";
+import { requireTeacher, ownSession, ownSetupSession, ownGroup, mustBeActive, submissionInfo, individualSubmissionInfo, onlineEditors } from "../authz";
+import { createSession, cloneSession, partConfig, setQuestions, activeGroupIds, entryTagsFor, designHintsFor, designHintsVisible, instructionBlocksFor, studentPart, touchDesignTemplate, ensureDesignSession, saveTagHints, setTagHintsVisible, tagHintsFor, tagHintsVisible } from "../sessions";
 import { entriesWhere, deleteImageFile } from "../entries";
 import { classBoardFor, publishedShares, publishedAi, critiquePromptsOf, stageCritiquePrompts, reactionsFor } from "../sharing";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS, DEFAULT_CRITIQUE_PROMPTS, type InstructionBlock } from "../constants";
@@ -48,15 +48,24 @@ route("GET", "/teacher/assigned-templates", (ctx) => {
       refLinks: JSON.parse(String(r.ref_links_json)),
       educator: r.educator_name,
       assignedAt: num(r.assigned_at),
-      parts: [1, 2, 3].map((p) => ({
-        part: p,
-        instructions: String(get("SELECT instructions FROM template_parts WHERE template_id=? AND part=?", num(r.template_id), p)?.instructions ?? ""),
-        webLink: String(get("SELECT web_link FROM template_parts WHERE template_id=? AND part=?", num(r.template_id), p)?.web_link ?? ""),
-        questions: all("SELECT text FROM template_questions WHERE template_id=? AND part=? ORDER BY position", num(r.template_id), p).map((q) => String(q.text)),
-      })),
+      parts: templatePreview(num(r.template_id)),
     })),
   };
 });
+
+/** What a teacher sees before importing: each part's overview, link, tasks and guiding questions from the design. */
+function templatePreview(templateId: number) {
+  const sid = ensureDesignSession(templateId);
+  return partConfig(sid).map((p) => ({
+    part: p.part,
+    instructions: p.instructions,
+    webLink: p.webLink,
+    questions: p.questions.map((q) => q.text),
+    tasks: p.instructionBlocks.map((b) => ({ title: b.title, text: b.text, questions: b.questions, hasDiagram: !!b.attachment, hasPdf: !!b.pdf, webLink: b.webLink })),
+    hasDiagram: !!p.diagram,
+    hasFile: !!p.attachment,
+  }));
+}
 
 route("POST", "/teacher/sessions", (ctx) => {
   const t = requireTeacher(ctx);
@@ -119,7 +128,7 @@ function rosterRows(where: string, ...params: unknown[]) {
   }));
 }
 
-route("GET", "/teacher/sessions/:id", (ctx) => sessionDetail(ownSession(ctx, ctx.params.id)));
+route("GET", "/teacher/sessions/:id", (ctx) => sessionDetail(ownSetupSession(ctx, ctx.params.id)));
 
 route("PUT", "/teacher/sessions/:id/design-tag-hints/visibility", (ctx) => {
   const s = ownSession(ctx, ctx.params.id);
@@ -143,7 +152,7 @@ route("PUT", "/teacher/sessions/:id/parts/:n/tag-hints/visibility", (ctx) => {
 });
 
 function updateSessionSettings(ctx: Ctx) {
-  const s = ownSession(ctx, ctx.params.id);
+  const s = ownSetupSession(ctx, ctx.params.id);
   mustBeActive(s);
   const part = ctx.params.n === undefined ? undefined : partNo(ctx.params.n);
   const b = ctx.body || {};
@@ -214,15 +223,16 @@ function updateSessionSettings(ctx: Ctx) {
       if (tags !== undefined) run("INSERT INTO session_entry_tags(session_id,tags_json) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET tags_json=excluded.tags_json", sid, JSON.stringify(tags));
     }
     if (hintsJson !== undefined) saveTagHints(sid, hintPart, hintsJson);
+    touchDesignTemplate(sid);
     audit("staff", ctx.auth.staff!.id, part === undefined ? "session.update" : "stage.settings", `session:${sid}${part === undefined ? "" : `:part${part}`}`);
   });
-  return sessionDetail(ownSession(ctx, sid));
+  return sessionDetail(ownSetupSession(ctx, sid));
 }
 route("PATCH", "/teacher/sessions/:id", updateSessionSettings);
 route("PATCH", "/teacher/sessions/:id/parts/:n/settings", updateSessionSettings);
 
 route("PUT", "/teacher/sessions/:id/parts/:n", (ctx) => {
-  const s = ownSession(ctx, ctx.params.id);
+  const s = ownSetupSession(ctx, ctx.params.id);
   mustBeActive(s);
   const part = partNo(ctx.params.n);
   const b = ctx.body || {};
@@ -278,18 +288,19 @@ route("PUT", "/teacher/sessions/:id/parts/:n", (ctx) => {
     }
   });
   removedFiles.forEach(removeInstructionFile);
+  touchDesignTemplate(sid);
   return { parts: partConfig(sid) };
 });
 
 const attachmentPath = "/teacher/sessions/:id/parts/:n/attachment";
 const taskAttachmentPath = "/teacher/sessions/:id/parts/:n/tasks/:taskId/attachment";
 function getInstructionAttachment(ctx: Ctx) {
-  const sid = num(ownSession(ctx, ctx.params.id).id);
+  const sid = num(ownSetupSession(ctx, ctx.params.id).id);
   const taskId = ctx.params.taskId;
   return downloadInstructionFile(attachmentRow(sid, partNo(ctx.params.n), taskId), taskId !== undefined || ctx.query.get("preview") === "1");
 }
 async function putInstructionAttachment(ctx: Ctx) {
-  const s = ownSession(ctx, ctx.params.id);
+  const s = ownSetupSession(ctx, ctx.params.id);
   mustBeActive(s);
   const sid = num(s.id);
   const part = partNo(ctx.params.n);
@@ -304,7 +315,7 @@ async function putInstructionAttachment(ctx: Ctx) {
   try {
     const file = await receiveInstructionFile(ctx.req, taskId !== undefined);
     try {
-      mustBeActive(ownSession(ctx, sid));
+      mustBeActive(ownSetupSession(ctx, sid));
       assertTaskExists();
       const old = attachmentRow(sid, part, taskId);
       if (taskId === undefined) run(
@@ -320,13 +331,14 @@ async function putInstructionAttachment(ctx: Ctx) {
       removeInstructionFile(file.storageName);
       throw error;
     }
+    touchDesignTemplate(sid);
     return { attachment: attachmentInfo(sid, part, `/api/teacher/sessions/${sid}`, taskId) };
   } finally {
     uploadsInProgress.delete(key);
   }
 }
 function deleteInstructionAttachment(ctx: Ctx) {
-  const s = ownSession(ctx, ctx.params.id);
+  const s = ownSetupSession(ctx, ctx.params.id);
   mustBeActive(s);
   const sid = num(s.id);
   const part = partNo(ctx.params.n);
@@ -336,6 +348,7 @@ function deleteInstructionAttachment(ctx: Ctx) {
   if (taskId === undefined) run("DELETE FROM instruction_attachments WHERE session_id=? AND part=?", sid, part);
   else run("DELETE FROM task_instruction_attachments WHERE session_id=? AND part=? AND task_id=?", sid, part, taskId);
   if (old) removeInstructionFile(String(old.storage_name));
+  touchDesignTemplate(sid);
   return { attachment: null };
 }
 for (const path of [attachmentPath, taskAttachmentPath]) {
@@ -348,11 +361,11 @@ for (const path of [attachmentPath, taskAttachmentPath]) {
 const extraPaths: [string, ExtraKind][] = [["/teacher/sessions/:id/parts/:n/diagram", "part_diagram"], ["/teacher/sessions/:id/parts/:n/tasks/:taskId/pdf", "task_pdf"]];
 for (const [path, kind] of extraPaths) {
   route("GET", path, (ctx) => {
-    const sid = num(ownSession(ctx, ctx.params.id).id);
+    const sid = num(ownSetupSession(ctx, ctx.params.id).id);
     return downloadExtraFile(extraRow(sid, partNo(ctx.params.n), kind, ctx.params.taskId ?? ""), kind);
   });
   route("PUT", path, async (ctx) => {
-    const s = ownSession(ctx, ctx.params.id);
+    const s = ownSetupSession(ctx, ctx.params.id);
     mustBeActive(s);
     const sid = num(s.id);
     const part = partNo(ctx.params.n);
@@ -367,7 +380,7 @@ for (const [path, kind] of extraPaths) {
     try {
       const file = await receiveInstructionFile(ctx.req, kind === "part_diagram", kind === "task_pdf");
       try {
-        mustBeActive(ownSession(ctx, sid));
+        mustBeActive(ownSetupSession(ctx, sid));
         assertTaskExists();
         const old = extraRow(sid, part, kind, taskId);
         run(
@@ -379,13 +392,14 @@ for (const [path, kind] of extraPaths) {
         removeInstructionFile(file.storageName);
         throw error;
       }
+      touchDesignTemplate(sid);
       return { attachment: extraInfo(sid, part, kind, `/api/teacher/sessions/${sid}`, taskId) };
     } finally {
       uploadsInProgress.delete(key);
     }
   }, { binary: true });
   route("DELETE", path, (ctx) => {
-    const s = ownSession(ctx, ctx.params.id);
+    const s = ownSetupSession(ctx, ctx.params.id);
     mustBeActive(s);
     const sid = num(s.id);
     const part = partNo(ctx.params.n);
@@ -394,13 +408,14 @@ for (const [path, kind] of extraPaths) {
     const old = extraRow(sid, part, kind, taskId);
     run("DELETE FROM extra_instruction_files WHERE session_id=? AND part=? AND kind=? AND task_id=?", sid, part, kind, taskId);
     if (old) removeInstructionFile(String(old.storage_name));
+    touchDesignTemplate(sid);
     return { attachment: null };
   });
 }
 
 const previewPath = "/teacher/sessions/:id/student-view";
 route("GET", previewPath, (ctx) => {
-  const s = ownSession(ctx, ctx.params.id);
+  const s = ownSetupSession(ctx, ctx.params.id);
   const sid = num(s.id);
   const entryTags = entryTagsFor(sid);
   return {
@@ -409,12 +424,12 @@ route("GET", previewPath, (ctx) => {
   };
 });
 route("GET", `${previewPath}/class`, (ctx) => {
-  const s = ownSession(ctx, ctx.params.id);
+  const s = ownSetupSession(ctx, ctx.params.id);
   return classBoardFor(s);
 });
 for (const suffix of ["/parts/:n/attachment", "/parts/:n/tasks/:taskId/attachment"]) {
   route("GET", `${previewPath}${suffix}`, (ctx) => {
-    const sid = num(ownSession(ctx, ctx.params.id).id);
+    const sid = num(ownSetupSession(ctx, ctx.params.id).id);
     const part = partNo(ctx.params.n);
     if (get("SELECT visibility FROM session_parts WHERE session_id=? AND part=?", sid, part)?.visibility !== "open") throw forbidden("This part is not open to students.");
     const taskId = ctx.params.taskId;
@@ -423,7 +438,7 @@ for (const suffix of ["/parts/:n/attachment", "/parts/:n/tasks/:taskId/attachmen
 }
 for (const [suffix, kind] of [["/parts/:n/diagram", "part_diagram"], ["/parts/:n/tasks/:taskId/pdf", "task_pdf"]] as const) {
   route("GET", `${previewPath}${suffix}`, (ctx) => {
-    const sid = num(ownSession(ctx, ctx.params.id).id);
+    const sid = num(ownSetupSession(ctx, ctx.params.id).id);
     const part = partNo(ctx.params.n);
     if (get("SELECT visibility FROM session_parts WHERE session_id=? AND part=?", sid, part)?.visibility !== "open") throw forbidden("This part is not open to students.");
     return downloadExtraFile(extraRow(sid, part, kind, ctx.params.taskId ?? ""), kind);

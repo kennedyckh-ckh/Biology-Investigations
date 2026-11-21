@@ -315,6 +315,11 @@ function migrate(db: DB) {
   // unassigned: the teacher removed the student from their group. placeholder: added by the teacher, not joined yet.
   if (!cols.has("unassigned")) db.exec("ALTER TABLE students ADD COLUMN unassigned INTEGER NOT NULL DEFAULT 0");
   if (!cols.has("placeholder")) db.exec("ALTER TABLE students ADD COLUMN placeholder INTEGER NOT NULL DEFAULT 0");
+  // A template's parts and tasks are edited in a hidden design session, so educators use the same editor as teachers.
+  const tplCols = new Set(db.prepare("PRAGMA table_info(templates)").all().map((c) => String(c.name)));
+  if (!tplCols.has("design_session_id")) db.exec("ALTER TABLE templates ADD COLUMN design_session_id INTEGER");
+  const sessionCols = new Set(db.prepare("PRAGMA table_info(sessions)").all().map((c) => String(c.name)));
+  if (!sessionCols.has("template_design")) db.exec("ALTER TABLE sessions ADD COLUMN template_design INTEGER NOT NULL DEFAULT 0");
 }
 
 type G = typeof globalThis & { __db?: DB };

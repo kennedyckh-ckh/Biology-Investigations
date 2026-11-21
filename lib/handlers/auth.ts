@@ -74,7 +74,7 @@ route("GET", "/auth/demo-accounts", () => {
 
 /* ---------- Student join ---------- */
 function findSession(code: string) {
-  const s = get("SELECT * FROM sessions WHERE join_code=? AND status='active'", code.trim().toUpperCase());
+  const s = get("SELECT * FROM sessions WHERE join_code=? AND status='active' AND template_design=0", code.trim().toUpperCase());
   if (!s) throw notFound("We could not find an active session with that code.");
   return s;
 }

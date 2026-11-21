@@ -3,6 +3,8 @@ import { all, get, run, tx, now, num, audit } from "../db";
 import { requireEducator } from "../authz";
 import { hashPassword } from "../auth";
 import { isDemoPassword } from "../seed";
+import { deleteDesignSession, ensureDesignSession, partConfig, setQuestions } from "../sessions";
+import { LIMITS } from "../constants";
 
 function ownTemplate(ctx: Parameters<typeof requireEducator>[0], rawId: string | number) {
   const u = requireEducator(ctx);
@@ -13,6 +15,7 @@ function ownTemplate(ctx: Parameters<typeof requireEducator>[0], rawId: string |
 
 function templateDetail(t: Record<string, unknown>) {
   const id = num(t.id);
+  const designSessionId = ensureDesignSession(id);
   return {
     id,
     title: t.title,
@@ -20,12 +23,9 @@ function templateDetail(t: Record<string, unknown>) {
     aiCriteria: t.ai_criteria,
     version: num(t.version),
     updatedAt: num(t.updated_at),
-    parts: [1, 2, 3].map((part) => ({
-      part,
-      instructions: String(get("SELECT instructions FROM template_parts WHERE template_id=? AND part=?", id, part)?.instructions ?? ""),
-      webLink: String(get("SELECT web_link FROM template_parts WHERE template_id=? AND part=?", id, part)?.web_link ?? ""),
-      questions: all("SELECT text FROM template_questions WHERE template_id=? AND part=? ORDER BY position", id, part).map((q) => String(q.text)),
-    })),
+    // Parts, tasks, files and stage settings live in the template's design session (edited with the teacher Setup editor).
+    designSessionId,
+    parts: partConfig(designSessionId).map((p) => ({ part: p.part, instructions: p.instructions, webLink: p.webLink, questions: p.questions.map((q) => q.text), taskCount: p.instructionBlocks.length })),
     assignments: all("SELECT a.id,a.teacher_id,a.note,a.ref_links_json,a.assigned_at,u.name,u.email FROM template_assignments a JOIN users u ON u.id=a.teacher_id WHERE a.template_id=? ORDER BY u.name", id).map((a) => ({
       id: num(a.id),
       teacherId: num(a.teacher_id),
@@ -82,6 +82,7 @@ route("POST", "/educator/templates", (ctx) => {
     for (const p of [1, 2, 3]) run("INSERT INTO template_parts(template_id,part) VALUES(?,?)", tid, p);
     return tid;
   });
+  ensureDesignSession(id);
   return { id };
 });
 
@@ -93,17 +94,24 @@ route("PUT", "/educator/templates/:id", (ctx) => {
   const title = str(b.title, 150, "Template title");
   const notes = str(b.pedagogyNotes, 6000, "Pedagogical notes", { optional: true });
   const criteria = str(b.aiCriteria, 2000, "AI analysis criteria", { optional: true });
-  if (!Array.isArray(b.parts) || b.parts.length !== 3) throw bad("Provide all three parts");
+  // Parts are optional here: the template page edits them through the shared Setup editor.
+  // Older clients may still send the overview, link and part-wide questions for each part.
+  const parts = b.parts === undefined ? [] : b.parts;
+  if (!Array.isArray(parts) || (parts.length && parts.length !== 3)) throw bad("Provide all three parts");
   const tid = num(t.id);
+  const sid = ensureDesignSession(tid);
+  const updates = (parts as { part: number; instructions?: string; webLink?: string; questions?: unknown[] }[]).map((p) => {
+    const part = int(p.part, "part");
+    if (part < 1 || part > 3) throw bad("Invalid part");
+    const qs = (Array.isArray(p.questions) ? p.questions : []).map((q) => str(q, LIMITS.guidingQuestionMax, "Guiding question", { optional: true })).filter(Boolean).slice(0, 20);
+    return { part, instructions: str(p.instructions, LIMITS.instructionTextMax, "Instructions", { optional: true }), link: safeLink(p.webLink), qs };
+  });
   tx(() => {
     run("UPDATE templates SET title=?, pedagogy_notes=?, ai_criteria=?, version=version+1, updated_at=? WHERE id=?", title, notes, criteria, now(), tid);
-    for (const p of b.parts as { part: number; instructions?: string; webLink?: string; questions?: unknown[] }[]) {
-      const part = int(p.part, "part");
-      if (part < 1 || part > 3) throw bad("Invalid part");
-      run("INSERT INTO template_parts(template_id,part,instructions,web_link) VALUES(?,?,?,?) ON CONFLICT(template_id,part) DO UPDATE SET instructions=excluded.instructions, web_link=excluded.web_link", tid, part, str(p.instructions, 5000, "Instructions", { optional: true }), safeLink(p.webLink));
-      run("DELETE FROM template_questions WHERE template_id=? AND part=?", tid, part);
-      const qs = (Array.isArray(p.questions) ? p.questions : []).map((q) => str(q, 500, "Guiding question", { optional: true })).filter(Boolean).slice(0, 20);
-      qs.forEach((q, i) => run("INSERT INTO template_questions(template_id,part,position,text) VALUES(?,?,?,?)", tid, part, i, q));
+    run("UPDATE sessions SET title=?, ai_criteria=? WHERE id=?", title, criteria, sid);
+    for (const u of updates) {
+      run("UPDATE session_parts SET instructions=?, web_link=? WHERE session_id=? AND part=?", u.instructions, u.link, sid, u.part);
+      setQuestions(sid, u.part, u.qs);
     }
   });
   audit("staff", ctx.auth.staff!.id, "template.update", `template:${tid}`);
@@ -113,6 +121,7 @@ route("PUT", "/educator/templates/:id", (ctx) => {
 route("DELETE", "/educator/templates/:id", (ctx) => {
   const t = ownTemplate(ctx, ctx.params.id);
   run("DELETE FROM templates WHERE id=?", num(t.id));
+  if (t.design_session_id != null) deleteDesignSession(num(t.design_session_id));
   return { ok: true };
 });
 
