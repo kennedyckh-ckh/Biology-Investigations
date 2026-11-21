@@ -9,6 +9,7 @@ import { LIMITS, type InstructionFile } from "./constants";
 import { bad, HttpError, notFound } from "./router";
 
 const DIR = path.join(UPLOAD_DIR, "instructions");
+export type ExtraKind = "part_diagram" | "task_pdf";
 const tooLarge = () => new HttpError(413, "too_large", "Instruction files must be 500 MB or smaller.");
 export const uploadsInProgress = new Set<string>();
 const previewMimeCache = new Map<string, string | null>();
@@ -32,6 +33,46 @@ function previewMime(storageName: string) {
   if (previewMimeCache.size >= 512) previewMimeCache.clear();
   previewMimeCache.set(storageName, mime);
   return mime;
+}
+
+function isPdf(storageName: string) {
+  const head = Buffer.alloc(5);
+  try {
+    const fd = openSync(path.join(DIR, storageName), "r");
+    try { return readSync(fd, head, 0, 5, 0) === 5 && head.toString("latin1") === "%PDF-"; } finally { closeSync(fd); }
+  } catch {
+    return false;
+  }
+}
+
+export function extraRow(sid: number, part: number, kind: ExtraKind, taskId = "") {
+  return get("SELECT * FROM extra_instruction_files WHERE session_id=? AND part=? AND kind=? AND task_id=?", sid, part, kind, taskId);
+}
+
+export function extraUrl(prefix: string, part: number, kind: ExtraKind, taskId = "") {
+  return kind === "part_diagram" ? `${prefix}/parts/${part}/diagram` : `${prefix}/parts/${part}/tasks/${encodeURIComponent(taskId)}/pdf`;
+}
+
+/** Part diagrams are images shown inline; task PDFs open in the browser's PDF viewer. */
+export function extraInfo(sid: number, part: number, kind: ExtraKind, prefix: string, taskId = ""): InstructionFile | null {
+  const row = extraRow(sid, part, kind, taskId);
+  return row ? extraFileInfo(row, part, kind, prefix) : null;
+}
+
+function extraFileInfo(row: Row, part: number, kind: ExtraKind, prefix: string): InstructionFile {
+  const url = extraUrl(prefix, part, kind, String(row.task_id));
+  const storageName = String(row.storage_name);
+  return { name: String(row.name), size: num(row.size), url, previewUrl: kind === "part_diagram" && previewMime(storageName) ? `${url}?v=${encodeURIComponent(storageName)}` : null };
+}
+
+export function taskPdfInfo(sid: number, part: number, prefix: string) {
+  return new Map(all("SELECT * FROM extra_instruction_files WHERE session_id=? AND part=? AND kind='task_pdf'", sid, part)
+    .map((row) => [String(row.task_id), extraFileInfo(row, part, "task_pdf", prefix)]));
+}
+
+export function downloadExtraFile(row: Row | undefined, kind: ExtraKind) {
+  if (!row) throw notFound(kind === "part_diagram" ? "No part diagram is attached." : "No PDF is attached to this task.");
+  return downloadInstructionFile(row, kind === "part_diagram", kind === "task_pdf");
 }
 
 export function attachmentRow(sid: number, part: number, taskId?: string) {
@@ -69,7 +110,7 @@ export function removeInstructionFile(storageName: string) {
   }
 }
 
-export async function receiveInstructionFile(req: Request, imageOnly = false) {
+export async function receiveInstructionFile(req: Request, imageOnly = false, pdfOnly = false) {
   const declaredSize = Number(req.headers.get("content-length"));
   if (declaredSize > LIMITS.instructionFileBytes) throw tooLarge();
   let name: string;
@@ -95,6 +136,7 @@ export async function receiveInstructionFile(req: Request, imageOnly = false) {
     }, createWriteStream(path.join(DIR, storageName), { flags: "wx" }));
     if (!size || (declaredSize > 0 && size !== declaredSize)) throw bad("The file is empty or the upload was incomplete.");
     if (imageOnly && !previewMime(storageName)) throw new HttpError(415, "not_previewable", "Choose a PNG, JPEG, WebP or GIF diagram.");
+    if (pdfOnly && !isPdf(storageName)) throw new HttpError(415, "not_pdf", "Choose a PDF file.");
     return { storageName, name, size };
   } catch (error) {
     removeInstructionFile(storageName);
@@ -105,7 +147,7 @@ export async function receiveInstructionFile(req: Request, imageOnly = false) {
   }
 }
 
-export function downloadInstructionFile(row: Row | undefined, preview = false) {
+export function downloadInstructionFile(row: Row | undefined, preview = false, pdf = false) {
   if (!row) throw notFound("No instruction file is attached.");
   const storageName = String(row.storage_name);
   const file = path.join(DIR, storageName);
@@ -114,15 +156,16 @@ export function downloadInstructionFile(row: Row | undefined, preview = false) {
   const name = String(row.name);
   const fallback = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
   const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-  const mime = preview ? previewMime(storageName) : null;
+  const pdfInline = pdf && isPdf(storageName);
+  const mime = preview ? previewMime(storageName) : pdfInline ? "application/pdf" : null;
   if (preview && !mime) throw new HttpError(415, "not_previewable", "This attachment is not a supported image.");
-  return new Response(Readable.toWeb(createReadStream(file)) as unknown as ReadableStream, {
-    headers: {
-      "Content-Type": mime ?? "application/octet-stream",
-      "Content-Disposition": `${mime ? "inline" : "attachment"}; filename="${fallback}"; filename*=UTF-8''${encoded}`,
-      "Content-Length": String(size),
-      "X-Content-Type-Options": "nosniff",
-      "Content-Security-Policy": "default-src 'none'; sandbox",
-    },
-  });
+  const headers: Record<string, string> = {
+    "Content-Type": mime ?? "application/octet-stream",
+    "Content-Disposition": `${mime ? "inline" : "attachment"}; filename="${fallback}"; filename*=UTF-8''${encoded}`,
+    "Content-Length": String(size),
+    "X-Content-Type-Options": "nosniff",
+  };
+  // A sandboxed CSP stops browsers from opening their built-in PDF viewer, so verified PDFs only block scripts and framing.
+  headers["Content-Security-Policy"] = pdfInline ? "script-src 'none'; frame-ancestors 'self'" : "default-src 'none'; sandbox";
+  return new Response(Readable.toWeb(createReadStream(file)) as unknown as ReadableStream, { headers });
 }

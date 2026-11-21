@@ -4,6 +4,7 @@ import { api, usePoll, fmtTime, ApiError } from "@/lib/client/api";
 import { EnlargeView, EntryBody, TagBadge, Modal, Spinner, ErrorBox, Empty, useToast, type TableData } from "@/components/ui";
 import { partIcon, WorkspaceHeading, WorkspaceIcon } from "@/components/workspace-icon";
 import type { DesignTagHint, InstructionFile } from "@/lib/constants";
+import { RichText } from "@/components/rich-text";
 import { EntryEditor, draftStorage } from "./entry-editor";
 import type { Entry, PartInfo, SaveStatus, Submission } from "./types";
 
@@ -53,6 +54,15 @@ function InstructionResource({ file, title }: { file: InstructionFile; title: st
   );
 }
 
+function PdfResource({ file, title }: { file: InstructionFile; title: string }) {
+  return <div className="mt-3 flex max-w-full flex-wrap items-center gap-2 rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm">
+    <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0 text-rose-700" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden="true"><path d="M14 3H6v18h12V7l-4-4Zm0 0v4h4" /><path d="M8.5 16.5h7M8.5 13h7" strokeLinecap="round" /></svg>
+    <span className="min-w-0 break-all font-medium text-slate-800">{file.name}</span>
+    <a className="btn-ghost btn-sm" href={file.url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${title}: ${file.name} in a new tab`}>Open PDF</a>
+    <a className="btn-ghost btn-sm" href={file.url} download={file.name} aria-label={`Download ${title}: ${file.name}`}><WorkspaceIcon name="download" />Download</a>
+  </div>;
+}
+
 function EntryTagHelp({ hints }: { hints: DesignTagHint[] }) {
   const [open, setOpen] = useState(false);
   const [selectedTag, setSelectedTag] = useState("");
@@ -80,7 +90,7 @@ function EntryTagHelp({ hints }: { hints: DesignTagHint[] }) {
 
 export function GroupEntryHeading({ info }: { info: PartInfo }) {
   return <div className="rounded-xl border border-blue-100 bg-white p-3">
-    {info.part === 1 ? <EntryTagHelp hints={info.designTagHints ?? []} /> : <WorkspaceHeading icon="entries">Group entries</WorkspaceHeading>}
+    {info.designTagHints ? <EntryTagHelp hints={info.designTagHints} /> : <WorkspaceHeading icon="entries">Group entries</WorkspaceHeading>}
   </div>;
 }
 
@@ -99,29 +109,34 @@ export function StudentPartInstructions({ info }: { info: PartInfo }) {
   );
   return <section className="card">
     <WorkspaceHeading icon={partIcon(info.part)}>{info.title}</WorkspaceHeading>
-    {info.instructions && <p className="mt-2 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-slate-700">{info.instructions}</p>}
-    {(info.webLink || info.attachment) && <div className="mt-3 border-t border-blue-100 pt-2">
+    {info.instructions && <RichText text={info.instructions} className="mt-2 space-y-1 text-[15px] leading-relaxed text-slate-700" />}
+    {(info.webLink || info.attachment || info.diagram) && <div className="mt-3 border-t border-blue-100 pt-2">
       <p className="text-xs font-semibold text-blue-900">Shared part resources</p>
-      {info.webLink && <ResourceLink url={info.webLink} label="Open the part resource" />}
-      {info.attachment && <InstructionResource key={info.attachment.previewUrl ?? info.attachment.name} file={info.attachment} title="Shared part diagram" />}
+      {info.diagram && <InstructionResource key={info.diagram.previewUrl ?? info.diagram.name} file={info.diagram} title="Shared part diagram" />}
+      <div className="flex flex-wrap gap-2">
+        {info.webLink && <ResourceLink url={info.webLink} label="Open the part resource" />}
+        {info.attachment && !info.attachment.previewUrl && <InstructionResource file={info.attachment} title="Shared part file" />}
+      </div>
+      {info.attachment?.previewUrl && <InstructionResource key={info.attachment.previewUrl} file={info.attachment} title="Shared part file" />}
     </div>}
     {!!info.instructionBlocks?.length && (
       <div className="mt-4 space-y-3">
         <WorkspaceHeading as="h4" icon="task">Tasks</WorkspaceHeading>
         <ol className="space-y-2">
-          {info.instructionBlocks.map(({ id, title, text, webLink, attachment, questions }, i) => (
+          {info.instructionBlocks.map(({ id, title, text, webLink, attachment, pdf, questions }, i) => (
             <li key={id} className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 sm:p-4">
               <h5 className="break-words text-sm font-semibold text-blue-950">Task {i + 1}{title ? `: ${title}` : ""}</h5>
-              <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{text}</p>
+              <RichText text={text} className="mt-1 space-y-1 text-sm leading-relaxed text-slate-700" />
               <GuidingQuestions qs={questions} task />
               {attachment && <InstructionResource key={attachment.previewUrl ?? attachment.name} file={attachment} title={`Task ${i + 1} diagram${title ? `: ${title}` : ""}`} />}
+              {pdf && <PdfResource file={pdf} title={`Task ${i + 1} PDF`} />}
               {webLink && <ResourceLink url={webLink} label="Open task resource" />}
             </li>
           ))}
         </ol>
       </div>
     )}
-    {!info.instructions && !info.instructionBlocks?.length && !info.attachment && !info.webLink && !info.questions?.length && <p className="mt-2 text-sm text-slate-600">No instructions yet.</p>}
+    {!info.instructions && !info.instructionBlocks?.length && !info.attachment && !info.diagram && !info.webLink && !info.questions?.length && <p className="mt-2 text-sm text-slate-600">No instructions yet.</p>}
     <GuidingQuestions qs={info.questions?.map((q) => q.text) ?? []} />
   </section>;
 }

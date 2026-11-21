@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test:api": "node scripts/test-api.mjs",
     "test:ai": "node scripts/test-ai.mjs",
+    "test:teacher-controls": "node scripts/test-teacher-controls.mjs",
     "test:unit": "tsx scripts/test-ai-unit.ts",
     "test:api-budget": "tsx scripts/test-api-budget.ts",
     "test:reaction-ranking": "tsx scripts/test-reaction-ranking.ts",

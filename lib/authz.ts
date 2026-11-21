@@ -39,13 +39,14 @@ export interface StudentCtx {
   session: Row;
   group: Row;
 }
-export function requireStudent(ctx: Ctx, opts: { allowArchived?: boolean } = {}): StudentCtx {
+export function requireStudent(ctx: Ctx, opts: { allowArchived?: boolean; allowUnassigned?: boolean } = {}): StudentCtx {
   if (!ctx.auth.studentId) throw new HttpError(401, "unauthenticated", "Please join your session again.");
   const student = get("SELECT * FROM students WHERE id=?", ctx.auth.studentId);
   if (!student) throw new HttpError(401, "unauthenticated", "Please join your session again.");
   const session = get("SELECT * FROM sessions WHERE id=?", num(student.session_id))!;
   const group = get("SELECT * FROM groups WHERE id=?", num(student.group_id))!;
   if (!opts.allowArchived && session.status !== "active") throw forbidden("This session has been archived by your teacher.", "session_archived");
+  if (!opts.allowUnassigned && num(student.unassigned)) throw forbidden("Your teacher has removed you from your group. Wait for your teacher to add you to a group.", "unassigned");
   if (now() - num(student.last_seen) > 20000) run("UPDATE students SET last_seen=? WHERE id=?", now(), num(student.id));
   return { student, session, group };
 }

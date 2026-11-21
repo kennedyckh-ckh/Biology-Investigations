@@ -150,6 +150,30 @@ CREATE TABLE IF NOT EXISTS task_instruction_attachments(
   PRIMARY KEY(session_id, part, task_id),
   FOREIGN KEY(session_id, part) REFERENCES part_instruction_blocks(session_id, part) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS stage_tag_hints(
+  session_id INTEGER NOT NULL,
+  part INTEGER NOT NULL CHECK(part IN (2,3)),
+  hints_json TEXT NOT NULL,
+  PRIMARY KEY(session_id, part),
+  FOREIGN KEY(session_id, part) REFERENCES session_parts(session_id, part) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS stage_hint_release(
+  session_id INTEGER NOT NULL,
+  part INTEGER NOT NULL CHECK(part IN (2,3)),
+  PRIMARY KEY(session_id, part),
+  FOREIGN KEY(session_id, part) REFERENCES session_parts(session_id, part) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS extra_instruction_files(
+  session_id INTEGER NOT NULL,
+  part INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('part_diagram','task_pdf')),
+  task_id TEXT NOT NULL DEFAULT '',
+  storage_name TEXT NOT NULL,
+  name TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  PRIMARY KEY(session_id, part, kind, task_id),
+  FOREIGN KEY(session_id, part) REFERENCES session_parts(session_id, part) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS groups(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -285,6 +309,14 @@ CREATE TABLE IF NOT EXISTS ai_api_requests(
 CREATE INDEX IF NOT EXISTS idx_ai_api_requests_started ON ai_api_requests(started_at);
 `;
 
+/* Additive column migrations for databases created by earlier versions. */
+function migrate(db: DB) {
+  const cols = new Set(db.prepare("PRAGMA table_info(students)").all().map((c) => String(c.name)));
+  // unassigned: the teacher removed the student from their group. placeholder: added by the teacher, not joined yet.
+  if (!cols.has("unassigned")) db.exec("ALTER TABLE students ADD COLUMN unassigned INTEGER NOT NULL DEFAULT 0");
+  if (!cols.has("placeholder")) db.exec("ALTER TABLE students ADD COLUMN placeholder INTEGER NOT NULL DEFAULT 0");
+}
+
 type G = typeof globalThis & { __db?: DB };
 
 function open(): DB {
@@ -292,6 +324,7 @@ function open(): DB {
   const db = new sqlite.DatabaseSync(path.join(DATA_DIR, process.env.DB_FILE || "app.db"));
   db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 

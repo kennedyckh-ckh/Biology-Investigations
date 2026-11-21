@@ -26,7 +26,7 @@ function IndividualReview({ sessionId, target, archived, onClose, onChanged }: {
     setBusy(true);
     try {
       await api("POST", path);
-      toast("Individual work reopened for revision");
+      toast("Individual work unlocked for resubmission");
       onChanged();
       onClose();
     } catch (e) { toast((e as ApiError).message, "err"); }
@@ -48,7 +48,7 @@ function IndividualReview({ sessionId, target, archived, onClose, onChanged }: {
               </article>
             ))}
           </div>
-          {!data.reopened && !archived && <button className="btn-ghost" disabled={busy} onClick={reopen}>Reopen individual work</button>}
+          {!data.reopened && !archived && <button className="btn-ghost" disabled={busy} onClick={reopen}>Unlock for resubmission</button>}
         </div>
       )}
     </Modal>
@@ -63,14 +63,32 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
   const [busy, setBusy] = useState(false);
   const [individual, setIndividual] = useState<{ studentId: number; part: number; name: string } | null>(null);
   const archived = session.status === "archived";
-  async function toggleHints(visible: boolean) {
+  async function toggleHints(part: number, visible: boolean) {
     setBusy(true);
     try {
-      await api("PUT", `/teacher/sessions/${session.id}/design-tag-hints/visibility`, { visible });
+      await api("PUT", `/teacher/sessions/${session.id}/parts/${part}/tag-hints/visibility`, { visible });
       await refresh();
-      toast(visible ? "Design tag hints shown to students" : "Design tag hints hidden from students");
+      onSessionChanged();
+      toast(visible ? `Part ${part} entry-tag hints shown to students` : `Part ${part} entry-tag hints hidden from students`);
     } catch (e) { toast((e as ApiError).message, "err"); }
     finally { setBusy(false); }
+  }
+  async function unlockAll(part: number) {
+    if (!confirm(`Unlock every submitted group and individual submission for Part ${part}, so students can revise and resubmit? Submitted versions are kept.`)) return;
+    setBusy(true);
+    try {
+      const r = await api<{ groups: number; individual: number }>("POST", `/teacher/sessions/${session.id}/parts/${part}/unlock-all`);
+      toast(r.groups + r.individual ? `Unlocked ${r.groups} group ${r.groups === 1 ? "submission" : "submissions"} and ${r.individual} individual ${r.individual === 1 ? "submission" : "submissions"}` : `No locked submissions in Part ${part}`);
+      refresh();
+    } catch (e) { toast((e as ApiError).message, "err"); }
+    finally { setBusy(false); }
+  }
+  async function reopenOne(studentId: number, part: number, name: string) {
+    try {
+      await api("POST", `/teacher/sessions/${session.id}/students/${studentId}/parts/${part}/submission`);
+      toast(`${name} can now revise and resubmit Part ${part}`);
+      refresh();
+    } catch (e) { toast((e as ApiError).message, "err"); }
   }
 
   async function setVis(part: number, visibility: string, ov?: { reason: string }) {
@@ -91,10 +109,10 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
     }
   }
   async function unlock(groupId: number, part: number, name: string) {
-    if (!confirm(`Unlock ${name}'s Part ${part} so they can revise it? Their submitted version is kept.`)) return;
+    if (!confirm(`Unlock ${name}'s Part ${part} so its members can revise and resubmit? This also reopens members' individual submissions for Part ${part}. Submitted versions are kept.`)) return;
     try {
       await api("POST", `/teacher/sessions/${session.id}/unlock-submission`, { groupId, part });
-      toast(`${name} can now revise Part ${part}`);
+      toast(`${name} can now revise and resubmit Part ${part}`);
       refresh();
     } catch (e) {
       toast((e as ApiError).message, "err");
@@ -136,6 +154,9 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
                 <div className="text-xs text-slate-500">active groups submitted</div>
                 {s.missing.length > 0 && s.activeGroups > 0 && <div className="mt-1 text-xs text-amber-700">Waiting: {s.missing.join(", ")}</div>}
                 {s.activeGroups > 0 && s.missing.length === 0 && <div className="mt-1 text-xs text-emerald-700">All groups submitted ✓</div>}
+                {!archived && (s.submitted > 0 || data.groups.some((g) => g.members.some((m) => m.individualSubmissions[s.part - 1].status === "submitted"))) && (
+                  <button className="btn-ghost btn-sm mt-2" disabled={busy} onClick={() => unlockAll(s.part)}>Unlock all for resubmission</button>
+                )}
               </div>
             ))}
           </div>
@@ -156,14 +177,18 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
                 ))}
               </div>
               <p className="mt-2 text-xs text-slate-500">{VIS.find((o) => o.v === p.visibility)?.hint}</p>
-              {p.part === 1 && (
-                <div className="mt-3 border-t border-slate-200 pt-3">
-                  <button className="btn-ghost btn-sm" disabled={busy || archived || (!data.designHintsVisible && !data.designHintCount)} onClick={() => toggleHints(!data.designHintsVisible)}>
-                    {data.designHintsVisible ? "Hide design tag hints" : "Show design tag hints"}
-                  </button>
-                  <p className="mt-1 text-xs text-slate-600">{!data.designHintCount ? "Write and save at least one Design entry-tag hint in Setup." : data.designHintsVisible ? (p.visibility === "open" ? "Students can open the hints next to Group entries." : "Hints are released and will be available when Part 1 opens.") : `${data.designHintCount} saved ${data.designHintCount === 1 ? "hint" : "hints"}. Students cannot read them until you release them.`}</p>
-                </div>
-              )}
+              {(() => {
+                const h = data.hints.find((x) => x.part === p.part) ?? { visible: false, count: 0 };
+                const noun = p.part === 1 ? "design tag hints" : `Part ${p.part} hints`;
+                return (
+                  <div className="mt-3 border-t border-slate-200 pt-3">
+                    <button className="btn-ghost btn-sm" disabled={busy || archived || (!h.visible && !h.count)} onClick={() => toggleHints(p.part, !h.visible)}>
+                      {h.visible ? `Hide ${noun}` : `Show ${noun}`}
+                    </button>
+                    <p className="mt-1 text-xs text-slate-600">{!h.count ? `Write and save at least one Part ${p.part} entry-tag hint in Setup.` : h.visible ? (p.visibility === "open" ? "Students can open the hints next to Group entries." : `Hints are released and will be available when Part ${p.part} opens.`) : `${h.count} saved ${h.count === 1 ? "hint" : "hints"}. Students cannot read them until you release them.`}</p>
+                  </div>
+                );
+              })()}
             </div>
           ))}
         </div>
@@ -171,6 +196,7 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
 
       <section>
         <h3 className="mb-3 text-lg font-bold">Group progress</h3>
+        {data.unassignedCount > 0 && <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-sm text-amber-900">{data.unassignedCount} {data.unassignedCount === 1 ? "student is" : "students are"} not in a group. Add them to a group in the Groups tab.</p>}
         <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
           <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -221,7 +247,7 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
                           )}
                           {st === "submitted" && !archived && (
                             <button className="btn-ghost btn-sm" onClick={() => unlock(g.id, p.part, g.name)}>
-                              Unlock for revision
+                              Unlock for resubmission
                             </button>
                           )}
                         </div>
@@ -233,11 +259,12 @@ export function Monitor({ session, onRead, onSessionChanged }: { session: Sessio
                             <ul className="mt-2 space-y-1">
                               {g.members.map((m) => {
                                 const my = m.individualSubmissions[p.part - 1];
-                                return <li key={m.id} className="flex flex-wrap items-center gap-2"><span>{m.name}</span>{my.revision ? (
+                                return <li key={m.id} className="flex flex-wrap items-center gap-2"><span>{m.name}</span>{my.revision ? (<>
                                   <button className="text-blue-800 underline" onClick={() => setIndividual({ studentId: m.id, part: p.part, name: m.name })}>
                                     {my.status === "revising" ? "Reopened · View last submission" : "View submission"}
                                   </button>
-                                ) : <span className="text-slate-500">Not submitted</span>}</li>;
+                                  {my.status === "submitted" && !archived && <button className="rounded border border-slate-300 bg-white px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-50" onClick={() => reopenOne(m.id, p.part, m.name)}>Unlock to resubmit</button>}
+                                </>) : <span className="text-slate-500">Not submitted</span>}</li>;
                               })}
                             </ul>
                           </details>

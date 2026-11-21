@@ -4,6 +4,7 @@ import { api, ApiError } from "@/lib/client/api";
 import { EnlargeView, Field, useToast } from "@/components/ui";
 import { LIMITS, PART_TITLES, TAGS, type InstructionFile } from "@/lib/constants";
 import { partIcon, WorkspaceHeading, WorkspaceIcon } from "@/components/workspace-icon";
+import { RichTextArea } from "@/components/rich-text";
 import type { SessionDetail, PartCfg } from "./types";
 
 export function Setup({ session, onSaved }: { session: SessionDetail; onSaved: () => void }) {
@@ -65,7 +66,7 @@ function StageSettings({ session, cfg, onSaved, disabled }: { session: SessionDe
   const [prompts, setPrompts] = useState(cfg.critiquePrompts);
   const [tags, setTags] = useState(cfg.entryTags.join("\n"));
   const [tagsEdited, setTagsEdited] = useState(false);
-  const [hints, setHints] = useState(session.designTagHints);
+  const [hints, setHints] = useState(cfg.tagHints);
   const [hintsEdited, setHintsEdited] = useState(false);
   const [hintTag, setHintTag] = useState("");
   const tagList = [...new Set(tags.split(/\r?\n/).map((tag) => tag.trim()).filter(Boolean))];
@@ -80,13 +81,13 @@ function StageSettings({ session, cfg, onSaved, disabled }: { session: SessionDe
       const saved = await api<SessionDetail>("PATCH", `/teacher/sessions/${session.id}/parts/${cfg.part}/settings`, {
         critiquePrompts: prompts,
         ...(tagsEdited ? { entryTags: tags.split(/\r?\n/).map((tag) => tag.trim()).filter(Boolean) } : {}),
-        ...(cfg.part === 1 && (tagsEdited || hintsEdited) ? { designTagHints: hints.filter(({ tag }) => tagList.includes(tag)) } : {}),
+        ...(tagsEdited || hintsEdited ? { tagHints: hints.filter(({ tag }) => tagList.includes(tag)) } : {}),
       });
       const savedPart = saved.parts.find((p) => p.part === cfg.part)!;
       setPrompts(savedPart.critiquePrompts);
       setTags(savedPart.entryTags.join("\n"));
       setTagsEdited(false);
-      setHints(saved.designTagHints);
+      setHints(savedPart.tagHints);
       setHintsEdited(false);
       toast(`Part ${cfg.part} stage settings saved`);
       onSaved();
@@ -99,7 +100,7 @@ function StageSettings({ session, cfg, onSaved, disabled }: { session: SessionDe
   return (
     <details className="rounded-lg border border-blue-200 bg-blue-50/65 p-3 sm:p-4">
       <summary className="cursor-pointer text-sm font-semibold text-blue-950">
-        <span className="ml-1 inline-flex items-center gap-2 align-middle"><WorkspaceIcon name="settings" />Stage settings: critique prompts and entry tags</span>
+        <span className="ml-1 inline-flex items-center gap-2 align-middle"><WorkspaceIcon name="settings" />Stage settings: critique prompts, entry tags and hints</span>
       </summary>
       <div className="mt-4 space-y-4">
       <fieldset className="min-w-0" disabled={busy || disabled} aria-describedby={`critique-prompts-help-${cfg.part}`}>
@@ -144,10 +145,10 @@ function StageSettings({ session, cfg, onSaved, disabled }: { session: SessionDe
           </button>
         </div>
       </details>
-      {cfg.part === 1 && <details className="rounded-lg border border-blue-100 bg-white p-3">
-        <summary className="cursor-pointer text-sm font-semibold text-blue-900">Design entry-tag hints</summary>
+      <details className="rounded-lg border border-blue-100 bg-white p-3">
+        <summary className="cursor-pointer text-sm font-semibold text-blue-900">{cfg.part === 1 ? "Design entry-tag hints" : `Part ${cfg.part} entry-tag hints`}</summary>
         <div className="mt-3 space-y-3">
-          <p className="text-sm text-slate-600">Write a short definition, example or question, then save your settings. {session.designHintsVisible ? "Hints are released. Students can open them while Part 1 is open. To hide them, go to Live monitor." : "To release the saved hints, click “Show design tag hints” in Live monitor."}</p>
+          <p className="text-sm text-slate-600">Write a short definition, example or question, then save your settings. {cfg.tagHintsVisible ? `Hints are released. Students can open them while Part ${cfg.part} is open. To hide them, go to Live monitor.` : `To release the saved hints, click “Show Part ${cfg.part} hints” in Live monitor.`}</p>
           {activeHintTag ? (
             <>
               <Field label="Choose a tag">
@@ -158,7 +159,7 @@ function StageSettings({ session, cfg, onSaved, disabled }: { session: SessionDe
               <Field label="Hint for the selected tag" hint="Leave this blank if you don’t want a hint for this tag.">
                 <textarea className="input min-h-24" disabled={busy || disabled} maxLength={LIMITS.designHintMax}
                   value={hints.find((h) => h.tag === activeHintTag)?.hint ?? ""}
-                  placeholder="Example: The independent variable is what you deliberately change."
+                  placeholder={cfg.part === 1 ? "Example: The independent variable is what you deliberately change." : cfg.part === 2 ? "Example: Record what you see, not what you expected to see." : "Example: A limitation is a feature of the method that reduces confidence in the conclusion."}
                   onChange={(e) => {
                     const text = e.target.value;
                     setHints((current) => [...current.filter(({ tag }) => tag !== activeHintTag), { tag: activeHintTag, hint: text }]);
@@ -169,16 +170,24 @@ function StageSettings({ session, cfg, onSaved, disabled }: { session: SessionDe
             </>
           ) : <p className="text-sm text-slate-600">Add an entry tag before writing a hint.</p>}
         </div>
-      </details>}
+      </details>
       <button className="btn-primary btn-sm" disabled={busy || disabled} onClick={save}>{busy ? "Saving…" : `Save Part ${cfg.part} stage settings`}</button>
       </div>
     </details>
   );
 }
 
-function InstructionAttachment({ sessionId, part, initial, onSaved, disabled, taskId, taskNumber, beforeUpload, uploadBlocked }: {
+type AttachmentVariant = "file" | "taskDiagram" | "taskPdf" | "partDiagram";
+const VARIANTS: Record<AttachmentVariant, { legend: string; help: string; accept?: string; noun: string; icon?: "diagram" | "task"; uploaded: string; removed: string }> = {
+  file: { legend: "Shared part file", help: "Any file type, up to 500 MB. Students download it from the part's shared resources.", noun: "file", uploaded: "Instruction file uploaded", removed: "Instruction file removed" },
+  partDiagram: { legend: "Shared part diagram (optional)", help: "PNG, JPEG, WebP or GIF, up to 500 MB. Shown with the part's shared resources, and students can enlarge it.", accept: "image/png,image/jpeg,image/webp,image/gif", noun: "diagram", icon: "diagram", uploaded: "Part diagram uploaded", removed: "Part diagram removed" },
+  taskDiagram: { legend: "Task diagram (optional)", help: "PNG, JPEG, WebP or GIF, up to 500 MB. Students can enlarge the diagram without leaving the task.", accept: "image/png,image/jpeg,image/webp,image/gif", noun: "diagram", icon: "diagram", uploaded: "Task diagram uploaded", removed: "Task diagram removed" },
+  taskPdf: { legend: "Task PDF (optional)", help: "A PDF worksheet, protocol or reading, up to 500 MB. Students can open it in the browser or download it.", accept: "application/pdf,.pdf", noun: "PDF", icon: "task", uploaded: "Task PDF attached", removed: "Task PDF removed" },
+};
+
+function InstructionAttachment({ sessionId, part, initial, onSaved, disabled, taskId, taskNumber, beforeUpload, uploadBlocked, variant = taskId ? "taskDiagram" : "file" }: {
   sessionId: number; part: number; initial: InstructionFile | null; onSaved: () => void; disabled: boolean; taskId?: string; taskNumber?: number;
-  beforeUpload?: () => Promise<boolean>; uploadBlocked?: boolean;
+  beforeUpload?: () => Promise<boolean>; uploadBlocked?: boolean; variant?: AttachmentVariant;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -187,9 +196,13 @@ function InstructionAttachment({ sessionId, part, initial, onSaved, disabled, ta
   const [error, setError] = useState("");
   const [inputVersion, setInputVersion] = useState(0);
   const toast = useToast();
-  const endpoint = `/teacher/sessions/${sessionId}/parts/${part}${taskId ? `/tasks/${taskId}` : ""}/attachment`;
-  const resource = taskId ? "diagram" : "file";
+  const v = VARIANTS[variant];
+  const endpoint = `/teacher/sessions/${sessionId}/parts/${part}${
+    variant === "file" ? "/attachment" : variant === "partDiagram" ? "/diagram" : variant === "taskDiagram" ? `/tasks/${taskId}/attachment` : `/tasks/${taskId}/pdf`}`;
+  const resource = v.noun;
   const busy = progress !== null || removing || preparing;
+  const isImage = variant === "taskDiagram" || variant === "partDiagram";
+  const where = taskNumber ? `Task ${taskNumber}` : `Part ${part}`;
 
   async function upload() {
     if (!file || busy || uploadBlocked) return;
@@ -210,7 +223,7 @@ function InstructionAttachment({ sessionId, part, initial, onSaved, disabled, ta
       if (request.status >= 200 && request.status < 300) {
         setFile(null);
         setInputVersion((n) => n + 1);
-        toast(taskId ? "Task diagram uploaded" : "Instruction file uploaded");
+        toast(v.uploaded);
         onSaved();
       } else {
         let message = `Upload failed (${request.status}).`;
@@ -228,7 +241,7 @@ function InstructionAttachment({ sessionId, part, initial, onSaved, disabled, ta
     setError("");
     try {
       await api("DELETE", endpoint);
-      toast(taskId ? "Task diagram removed" : "Instruction file removed");
+      toast(v.removed);
       onSaved();
     } catch (e) {
       setError((e as ApiError).message);
@@ -239,28 +252,32 @@ function InstructionAttachment({ sessionId, part, initial, onSaved, disabled, ta
 
   return (
     <fieldset className="min-w-0 space-y-2">
-      <legend className="label"><span className="inline-flex items-center gap-2">{taskId && <WorkspaceIcon name="diagram" />}{taskId ? "Task diagram (optional)" : "Shared part file"}</span></legend>
-      <p className="text-xs text-slate-600">{taskId ? "PNG, JPEG, WebP or GIF, up to 500 MB. Students can enlarge the diagram without leaving the task." : "This file applies to the whole part. Use Task diagram for images that belong to a specific task."}</p>
-      {initial && (taskId && initial.previewUrl
+      <legend className="label"><span className="inline-flex items-center gap-2">{v.icon && <WorkspaceIcon name={v.icon} />}{v.legend}</span></legend>
+      <p className="text-xs text-slate-600">{v.help}</p>
+      {initial && (isImage && initial.previewUrl
         ? <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={initial.previewUrl} alt="" className="h-14 w-auto max-w-[8rem] rounded border border-slate-200 object-contain" />
           <span className="break-all">{initial.name}</span>
-          <EnlargeView title={`Task ${taskNumber} diagram`} label="Enlarge diagram">
+          <EnlargeView title={`${where} diagram`} label="Enlarge diagram">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={initial.previewUrl} alt={`Task ${taskNumber} diagram: ${initial.name}`} className="mx-auto h-auto max-h-[68dvh] max-w-full object-contain" />
+            <img src={initial.previewUrl} alt={`${where} diagram: ${initial.name}`} className="mx-auto h-auto max-h-[68dvh] max-w-full object-contain" />
           </EnlargeView>
         </div>
-        : <p className="text-sm"><a className="break-all text-blue-700 underline" href={initial.previewUrl ?? initial.url} download={!initial.previewUrl} target={initial.previewUrl ? "_blank" : undefined} rel="noopener noreferrer">{initial.name}</a></p>)}
+        : <p className="text-sm"><a className="break-all text-blue-700 underline" href={initial.previewUrl ?? initial.url} download={variant === "file" && !initial.previewUrl} target={variant === "taskPdf" || initial.previewUrl ? "_blank" : undefined} rel="noopener noreferrer">{initial.name}</a>
+          <span className="ml-2 text-xs text-slate-500">{formatBytes(initial.size)}</span></p>)}
       {(!disabled || busy) && (
         <div className="flex flex-wrap items-center gap-2">
-          <input key={inputVersion} type="file" aria-label={taskId ? `Choose diagram for Task ${taskNumber}` : `Choose instruction file for Part ${part}`} accept={taskId ? "image/png,image/jpeg,image/webp,image/gif" : undefined} className="input min-w-0 max-w-sm" disabled={busy || disabled} onChange={(e) => {
+          <input key={inputVersion} type="file" aria-label={`Choose ${resource} for ${where}`} accept={v.accept} className="input min-w-0 max-w-sm" disabled={busy || disabled} onChange={(e) => {
             const selected = e.target.files?.[0] ?? null;
-            const invalid = selected && (selected.size > LIMITS.instructionFileBytes || selected.size === 0);
-            setFile(invalid ? null : selected);
-            setError(invalid ? "Choose a non-empty file no larger than 500 MB." : "");
-            if (invalid) e.target.value = "";
+            const tooBig = selected && (selected.size > LIMITS.instructionFileBytes || selected.size === 0);
+            const notPdf = variant === "taskPdf" && selected && !/\.pdf$/i.test(selected.name) && selected.type !== "application/pdf";
+            setFile(tooBig || notPdf ? null : selected);
+            setError(tooBig ? "Choose a non-empty file no larger than 500 MB." : notPdf ? "Choose a PDF file." : "");
+            if (tooBig || notPdf) e.target.value = "";
           }} />
           <button type="button" className="btn-ghost btn-sm" disabled={!file || busy || disabled || uploadBlocked} onClick={upload}>
-            <WorkspaceIcon name="upload" />{preparing ? "Saving part…" : beforeUpload ? "Save part and upload diagram" : initial ? `Replace ${resource}` : `Upload ${resource}`}
+            <WorkspaceIcon name="upload" />{preparing ? "Saving part…" : beforeUpload ? `Save part and upload ${resource}` : initial ? `Replace ${resource}` : `Upload ${resource}`}
           </button>
           {initial && <button type="button" className="btn-ghost btn-sm text-rose-700" disabled={busy || disabled} onClick={remove}>Remove {resource}</button>}
         </div>
@@ -270,6 +287,12 @@ function InstructionAttachment({ sessionId, part, initial, onSaved, disabled, ta
       {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
     </fieldset>
   );
+}
+
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function PartEditor({ sessionId, cfg, onSaved, disabled, stageSettings }: { sessionId: number; cfg: PartCfg; onSaved: () => void; disabled: boolean; stageSettings: ReactNode }) {
@@ -322,8 +345,8 @@ function PartEditor({ sessionId, cfg, onSaved, disabled, stageSettings }: { sess
         {dirty && <span className="badge bg-amber-100 text-amber-800">Unsaved changes</span>}
       </div>
       {stageSettings}
-      <Field label="Part overview" hint="Optional. Students see this before the numbered tasks.">
-        <textarea className="input min-h-[110px]" value={instructions} onChange={(e) => touch(setInstructions)(e.target.value)} disabled={disabled || busy} maxLength={LIMITS.instructionTextMax} />
+      <Field label="Part overview" hint="Optional. Students see this before the numbered tasks. Select text, then use the toolbar to format it.">
+        <RichTextArea label={`Part ${cfg.part} overview`} value={instructions} onChange={touch(setInstructions)} disabled={disabled || busy} maxLength={LIMITS.instructionTextMax} minHeight="min-h-[110px]" />
       </Field>
       <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 sm:p-4">
         <WorkspaceHeading as="h4" icon="task">Task instruction blocks</WorkspaceHeading>
@@ -347,8 +370,8 @@ function PartEditor({ sessionId, cfg, onSaved, disabled, stageSettings }: { sess
               <Field label="Task heading (optional)">
                 <input className="input" aria-label={`Task ${i + 1} heading`} value={block.title} disabled={disabled || busy} maxLength={LIMITS.instructionTitleMax} onChange={(e) => touch(setBlocks)(blocks.map((b, j) => j === i ? { ...b, title: e.target.value } : b))} />
               </Field>
-              <Field label="Task instructions">
-                <textarea className="input min-h-24" aria-label={`Task ${i + 1} instructions`} value={block.text} disabled={disabled || busy} maxLength={LIMITS.instructionTextMax} onChange={(e) => touch(setBlocks)(blocks.map((b, j) => j === i ? { ...b, text: e.target.value } : b))} />
+              <Field label="Task instructions" hint="Select text, then use the toolbar for bold, underline, text size or bullet points.">
+                <RichTextArea label={`Task ${i + 1} instructions`} value={block.text} disabled={disabled || busy} maxLength={LIMITS.instructionTextMax} onChange={(text) => touch(setBlocks)(blocks.map((b, j) => j === i ? { ...b, text } : b))} />
               </Field>
               <div className="rounded-lg border border-blue-100 bg-blue-50/70 p-3">
                 <QuestionList questions={block.questions} taskNumber={i + 1} disabled={disabled || busy} onChange={(questions) => touch(setBlocks)(blocks.map((b) => b.id === block.id ? { ...b, questions } : b))} />
@@ -362,19 +385,31 @@ function PartEditor({ sessionId, cfg, onSaved, disabled, stageSettings }: { sess
                   beforeUpload={cfg.instructionBlocks.some((b) => b.id === block.id) ? undefined : () => save(true)}
                   uploadBlocked={!cfg.instructionBlocks.some((b) => b.id === block.id) && blocks.some((b) => !b.text.trim())} />
               </div>
+              <div className="rounded-lg border border-blue-100 bg-slate-50 p-3">
+                <InstructionAttachment sessionId={sessionId} part={cfg.part} taskId={block.id} taskNumber={i + 1} variant="taskPdf"
+                  initial={cfg.instructionBlocks.find((b) => b.id === block.id)?.pdf ?? null} onSaved={onSaved} disabled={disabled || busy}
+                  beforeUpload={cfg.instructionBlocks.some((b) => b.id === block.id) ? undefined : () => save(true)}
+                  uploadBlocked={!cfg.instructionBlocks.some((b) => b.id === block.id) && blocks.some((b) => !b.text.trim())} />
+              </div>
             </li>
           ))}
         </ol>
         <button type="button" className="btn-ghost btn-sm" disabled={disabled || busy || blocks.length >= LIMITS.instructionBlockCount} onClick={() => touch(setBlocks)([...blocks, { id: crypto.randomUUID(), title: "", text: "", webLink: "", questions: [] }])}>+ Add task block</button>
         {blocks.some((b) => !b.text.trim()) && <p className="text-xs text-slate-600">Fill in the instructions for every task or remove blank tasks before saving.</p>}
       </div>
-      <details className="rounded-lg border border-slate-200 p-3">
+      <details className="rounded-lg border border-slate-200 p-3" open={!!(cfg.webLink || cfg.diagram || cfg.attachment) || undefined}>
         <summary className="cursor-pointer text-sm font-semibold">Shared part resources (optional)</summary>
-        <div className="mt-3 space-y-3">
-          {(cfg.webLink || link) && <Field label="Shared part web link" hint="Clear this link if you’ve moved it into a task.">
-            <input className="input" value={link} onChange={(e) => touch(setLink)(e.target.value)} disabled={disabled} maxLength={500} />
-          </Field>}
-          <InstructionAttachment sessionId={sessionId} part={cfg.part} initial={cfg.attachment} onSaved={onSaved} disabled={disabled} />
+        <div className="mt-3 space-y-4">
+          <p className="text-xs text-slate-600">These resources apply to the whole of Part {cfg.part}. Students see them under the part overview, above the tasks.</p>
+          <Field label="Shared part web link (optional)" hint="Save the part to apply a new or changed link.">
+            <input className="input" value={link} placeholder="https://…" onChange={(e) => touch(setLink)(e.target.value)} disabled={disabled || busy} maxLength={500} />
+          </Field>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <InstructionAttachment sessionId={sessionId} part={cfg.part} variant="partDiagram" initial={cfg.diagram} onSaved={onSaved} disabled={disabled} />
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <InstructionAttachment sessionId={sessionId} part={cfg.part} initial={cfg.attachment} onSaved={onSaved} disabled={disabled} />
+          </div>
         </div>
       </details>
       <QuestionList questions={qs} disabled={disabled || busy} onChange={touch(setQs)} />
