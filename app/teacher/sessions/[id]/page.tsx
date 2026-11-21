@@ -37,6 +37,8 @@ function Inner({ id }: { id: string }) {
   const [focus, setFocus] = useState<{ groupId: number; part: number } | null>(null);
   const [del, setDel] = useState(false);
   const [confirmTitle, setConfirmTitle] = useState("");
+  const [cloneTitle, setCloneTitle] = useState<string | null>(null);
+  const [cloning, setCloning] = useState(false);
 
   if (loading && !s) return <Spinner />;
   if (error || !s) return <div className="mx-auto max-w-lg p-8"><ErrorBox message={error?.message || "Session not found"} onRetry={refresh} /></div>;
@@ -50,6 +52,20 @@ function Inner({ id }: { id: string }) {
       refresh();
     } catch (e) {
       toast((e as ApiError).message, "err");
+    }
+  }
+  async function clone() {
+    if (cloneTitle === null) return;
+    setCloning(true);
+    try {
+      const r = await api<{ id: number }>("POST", `/teacher/sessions/${id}/clone`, { title: cloneTitle });
+      toast("Session copied. You’re now editing the copy.");
+      setCloneTitle(null);
+      router.push(`/teacher/sessions/${r.id}`);
+    } catch (e) {
+      toast((e as ApiError).message, "err");
+    } finally {
+      setCloning(false);
     }
   }
   async function remove() {
@@ -75,6 +91,7 @@ function Inner({ id }: { id: string }) {
           <a className="btn-accent" href={`/teacher/sessions/${s.id}/projector`} target="_blank" rel="noopener noreferrer">
             <WorkspaceIcon name="board" />Projector view
           </a>
+          <button className="btn-ghost" onClick={() => setCloneTitle(`${s.title} (copy)`.slice(0, 150))}>Copy session</button>
           {archived ? (
             <>
               <button className="btn-ghost" onClick={() => archive(false)}>
@@ -108,6 +125,19 @@ function Inner({ id }: { id: string }) {
       {tab === "sharing" && <Sharing session={s} onSaved={refresh} />}
       {tab === "ai" && <AiTab session={s} />}
       {tab === "export" && <ExportTab session={s} />}
+
+      {cloneTitle !== null && (
+        <Modal title="Copy this session" onClose={() => { if (!cloning) setCloneTitle(null); }}>
+          <p className="mb-3 text-sm text-slate-600">The copy gets a new join code. It includes session settings, all three parts with their tasks, formatting, files, diagrams and PDFs, stage settings and hints, and the group names, PINs and seat caps. Students, their work, shared responses and AI drafts are not copied. Hints start hidden, and only Part 1 starts open.</p>
+          <Field label="Title for the copy">
+            <input className="input" value={cloneTitle} maxLength={150} onChange={(e) => setCloneTitle(e.target.value)} autoFocus />
+          </Field>
+          <div className="mt-5 flex justify-end gap-2">
+            <button className="btn-ghost" disabled={cloning} onClick={() => setCloneTitle(null)}>Cancel</button>
+            <button className="btn-primary" disabled={cloning || !cloneTitle.trim()} onClick={clone}>{cloning ? "Copying…" : "Create copy"}</button>
+          </div>
+        </Modal>
+      )}
 
       {del && (
         <Modal title="Delete this session permanently?" onClose={() => setDel(false)}>

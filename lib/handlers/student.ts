@@ -13,14 +13,17 @@ import {
 import { entriesWhere, validateTag, validateTable, saveImage, deleteImageFile, readImage } from "../entries";
 import { entryTagsFor, studentPart } from "../sessions";
 import { classBoardFor, critiquePromptsOf, reactionsFor } from "../sharing";
-import { attachmentRow, downloadInstructionFile } from "../instruction-files";
+import { attachmentRow, downloadExtraFile, downloadInstructionFile, extraRow } from "../instruction-files";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS } from "../constants";
 
 route("GET", "/student/state", (ctx) => {
-  const sc = requireStudent(ctx, { allowArchived: true });
+  const sc = requireStudent(ctx, { allowArchived: true, allowUnassigned: true });
   const sid = num(sc.session.id);
   const gid = num(sc.group.id);
   const entryTags = entryTagsFor(sid);
+  const student = { id: num(sc.student.id), name: sc.student.name, class: sc.student.class, classNo: sc.student.class_no };
+  const session = { title: sc.session.title, archived: sc.session.status !== "active" };
+  if (num(sc.student.unassigned)) return { student, session, unassigned: true, group: { id: 0, name: "No group", members: [] }, parts: [], entryTags, serverTime: now() };
   const parts = [1, 2, 3]
     .map((part) => {
       const base = studentPart(sid, part);
@@ -33,7 +36,7 @@ route("GET", "/student/state", (ctx) => {
       };
     })
     .filter((x) => x !== null);
-  const members = all("SELECT s.id,s.name,s.class,s.class_no,p.last_beat FROM students s LEFT JOIN presence p ON p.student_id=s.id WHERE s.group_id=? ORDER BY s.name", gid).map((m) => ({
+  const members = all("SELECT s.id,s.name,s.class,s.class_no,p.last_beat FROM students s LEFT JOIN presence p ON p.student_id=s.id WHERE s.group_id=? AND s.unassigned=0 AND s.placeholder=0 ORDER BY s.name", gid).map((m) => ({
     id: num(m.id),
     name: m.name,
     class: m.class,
@@ -42,8 +45,9 @@ route("GET", "/student/state", (ctx) => {
     online: !!m.last_beat && now() - num(m.last_beat) < ONLINE_WINDOW_MS,
   }));
   return {
-    student: { id: num(sc.student.id), name: sc.student.name, class: sc.student.class, classNo: sc.student.class_no },
-    session: { title: sc.session.title, archived: sc.session.status !== "active" },
+    student,
+    session,
+    unassigned: false,
     group: { id: gid, name: sc.group.name, members },
     parts,
     entryTags,
@@ -62,6 +66,19 @@ route("GET", "/student/parts/:n/tasks/:taskId/attachment", (ctx) => {
   const part = partNo(ctx.params.n);
   assertStudentCanRead(sc, part);
   return downloadInstructionFile(attachmentRow(num(sc.session.id), part, ctx.params.taskId), true);
+});
+
+route("GET", "/student/parts/:n/diagram", (ctx) => {
+  const sc = requireStudent(ctx);
+  const part = partNo(ctx.params.n);
+  assertStudentCanRead(sc, part);
+  return downloadExtraFile(extraRow(num(sc.session.id), part, "part_diagram"), "part_diagram");
+});
+route("GET", "/student/parts/:n/tasks/:taskId/pdf", (ctx) => {
+  const sc = requireStudent(ctx);
+  const part = partNo(ctx.params.n);
+  assertStudentCanRead(sc, part);
+  return downloadExtraFile(extraRow(num(sc.session.id), part, "task_pdf", ctx.params.taskId), "task_pdf");
 });
 
 route("GET", "/student/entries", (ctx) => {
@@ -182,7 +199,7 @@ route("GET", "/student/submit-check", (ctx) => {
   const part = partNo(ctx.query.get("part"));
   assertStudentCanRead(sc, part);
   const entries = entriesWhere("e.group_id=? AND e.part=?", num(sc.group.id), part);
-  const members = all("SELECT id,name,class,class_no FROM students WHERE group_id=? ORDER BY name", num(sc.group.id)).map((m) => ({
+  const members = all("SELECT id,name,class,class_no FROM students WHERE group_id=? AND unassigned=0 AND placeholder=0 ORDER BY name", num(sc.group.id)).map((m) => ({
     id: num(m.id),
     name: String(m.name),
     class: String(m.class),
@@ -308,8 +325,8 @@ route("GET", "/images/:id", (ctx) => {
   let allowed = false;
   if (ctx.auth.staff?.role === "teacher" && num(e.teacher_id) === ctx.auth.staff.id) allowed = true;
   if (!allowed && ctx.auth.studentId) {
-    const st = get("SELECT session_id,group_id FROM students WHERE id=?", ctx.auth.studentId);
-    if (st && num(st.group_id) === num(e.group_id)) allowed = true;
+    const st = get("SELECT session_id,group_id,unassigned FROM students WHERE id=?", ctx.auth.studentId);
+    if (st && !num(st.unassigned) && num(st.group_id) === num(e.group_id)) allowed = true;
     else if (st && num(st.session_id) === num(e.session_id) && get("SELECT 1 FROM shares WHERE entry_id=?", num(e.id))) allowed = true;
   }
   if (!allowed) throw notFound();

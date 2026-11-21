@@ -386,8 +386,8 @@ async function main() {
 
   section("Unlock a submission for revision");
   eq("student cannot unlock", (await api(s1, "POST", `/teacher/sessions/${sid}/unlock-submission`, { groupId: gA, part: 1 })).status, 401);
-  eq("teacher unlocks Group A Part 1", (await api(t1, "POST", `/teacher/sessions/${sid}/unlock-submission`, { groupId: gA, part: 1 })).status, 200);
-  eq("reopening the group does not reopen an individual's work", (await api(s2, "PATCH", `/student/entries/${e2.id}`, { body: "still locked" })).json?.error, "individual_submitted");
+  eq("teacher unlocks Group A Part 1", (await api(t1, "POST", `/teacher/sessions/${sid}/unlock-submission`, { groupId: gA, part: 1, includeIndividual: false })).status, 200);
+  eq("reopening the group with includeIndividual: false does not reopen an individual's work", (await api(s2, "PATCH", `/student/entries/${e2.id}`, { body: "still locked" })).json?.error, "individual_submitted");
   const student2Id = (await api(s2, "GET", "/student/state")).json.student.id;
   await api(t1, "POST", `${sessionBase}/students/${student2Id}/parts/1/submission`);
   eq("group can revise after unlock", (await api(s2, "PATCH", `/student/entries/${e2.id}`, { body: "Compare three brands fairly" })).status, 200);
@@ -510,7 +510,7 @@ async function main() {
   eq("another teacher cannot edit stage settings", (await api(t2, "PATCH", stagePath(1), { entryTags: stageTags })).status, 404);
   eq("students cannot edit stage settings", (await api(s1, "PATCH", stagePath(1), { entryTags: stageTags })).status, 401);
   eq("duplicate tags rejected in a stage", (await api(t1, "PATCH", stagePath(1), { entryTags: ["Tag", "tag"] })).status, 400);
-  eq("design hints cannot be authored in Part 2", (await api(t1, "PATCH", stagePath(2), { designTagHints: [] })).status, 400);
+  eq("entry-tag hints can be authored in Part 2", (await api(t1, "PATCH", stagePath(2), { tagHints: [] })).status, 200);
   eq("owner can set Part 1 tags and its design hint", (await api(t1, "PATCH", stagePath(1), { entryTags: [stageTags[0]], critiquePrompts: [stagePrompts[0]], designTagHints: [{ tag: stageTags[0], hint: "Explain why you chose this design." }] })).status, 200);
   eq("owner can set independent Part 2 tags and prompts", (await api(t1, "PATCH", stagePath(2), { entryTags: [stageTags[1]], critiquePrompts: [stagePrompts[1]] })).status, 200);
   eq("owner can set independent Part 3 tags and prompts", (await api(t1, "PATCH", stagePath(3), { entryTags: [stageTags[2]], critiquePrompts: [stagePrompts[2]] })).status, 200);

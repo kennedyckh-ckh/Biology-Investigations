@@ -25,6 +25,19 @@ export default function StudentPage() {
       </div>
     );
 
+  if (data.unassigned) return (
+    <div className="min-h-screen">
+      <Header title={data.session.title} sub={`${data.student.name} · ${data.student.class} · No. ${data.student.classNo}`}
+        right={<button className="btn-ghost btn-sm" onClick={async () => { await api("POST", "/auth/logout").catch(() => {}); router.push("/"); }}>Leave</button>} />
+      <main className="mx-auto max-w-lg px-4 py-16">
+        <div className="card space-y-2 text-center" role="status">
+          <h2 className="text-lg font-semibold text-blue-950">You’re not in a group at the moment</h2>
+          <p className="text-sm text-slate-600">Your teacher has removed you from your group. Your work has been kept. When your teacher adds you to a group, your workspace will open here automatically.</p>
+        </div>
+      </main>
+    </div>
+  );
+
   const tab = visibleStudentTab(data.parts, selectedTab);
   const current = typeof tab === "number" ? data.parts.find((p) => p.part === tab) : undefined;
   const hasRef = current && !current.locked && current.part > 1;

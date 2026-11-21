@@ -16,7 +16,7 @@ export const TAGS = [
 export type Tag = (typeof TAGS)[number];
 export type PeerReaction = "like" | "heart";
 export interface InstructionFile { name: string; size: number; url: string; previewUrl: string | null }
-export interface InstructionBlock { id: string; title: string; text: string; webLink: string; questions: string[]; attachment?: InstructionFile | null }
+export interface InstructionBlock { id: string; title: string; text: string; webLink: string; questions: string[]; attachment?: InstructionFile | null; pdf?: InstructionFile | null }
 export interface DesignTagHint { tag: string; hint: string }
 export interface CritiquePrompt { key: string; label: string; enabled: boolean }
 
@@ -56,6 +56,8 @@ export const LIMITS = {
   entryTagMax: 60,
   entryTagCount: 30,
   designHintMax: 500,
+  passwordMin: 12,
+  passwordMax: 200,
 };
 
 export const ONLINE_WINDOW_MS = 15000;

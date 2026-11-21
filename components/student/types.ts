@@ -27,6 +27,7 @@ export interface PartInfo {
   instructionBlocks?: InstructionBlock[];
   webLink?: string;
   attachment?: InstructionFile | null;
+  diagram?: InstructionFile | null;
   designTagHints?: DesignTagHint[];
   questions?: { id: number; text: string }[];
   entryTags?: string[];
@@ -35,6 +36,7 @@ export interface PartInfo {
   entryCount?: number;
 }
 export interface StateResp {
+  unassigned?: boolean;
   student: { id: number; name: string; class: string; classNo: string };
   session: { title: string; archived: boolean };
   group: { id: number; name: string; members: { id: number; name: string; class: string; classNo: string; me: boolean; online: boolean }[] };

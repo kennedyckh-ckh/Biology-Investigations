@@ -7,6 +7,9 @@ export interface PartCfg {
   instructionBlocks: InstructionBlock[];
   webLink: string;
   attachment: InstructionFile | null;
+  diagram: InstructionFile | null;
+  tagHints: DesignTagHint[];
+  tagHintsVisible: boolean;
   visibility: "hidden" | "visible" | "open";
   questions: { id: number; text: string }[];
   entryTags: string[];
@@ -26,8 +29,10 @@ export interface SessionDetail {
   pedagogyNotes: string;
   source: { templateId: number; title: string; importedVersion: number; currentVersion: number | null } | null;
   parts: PartCfg[];
-  groups: { id: number; name: string; pin: string; seatCap: number | null; members: number }[];
+  groups: { id: number; name: string; pin: string; seatCap: number | null; members: number; students: RosterStudent[] }[];
+  unassigned: RosterStudent[];
 }
+export interface RosterStudent { id: number; name: string; class: string; classNo: string; joined: boolean; entries: number; groupId: number }
 export interface TEntry {
   id: number;
   part: number;
@@ -46,6 +51,8 @@ export interface StatusResp {
   status: string;
   designHintsVisible: boolean;
   designHintCount: number;
+  hints: { part: number; visible: boolean; count: number }[];
+  unassignedCount: number;
   parts: { part: number; title: string; visibility: "hidden" | "visible" | "open" }[];
   groups: {
     id: number;

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { route, bad, forbidden, notFound, HttpError, str, type Ctx } from "../router";
 import { all, get, run, tx, now, num, audit } from "../db";
-import { verifyPassword, issueToken, revokeToken, rateLimit, rateLimitReset, STAFF_COOKIE, STUDENT_COOKIE } from "../auth";
+import { hashPassword, verifyPassword, issueToken, revokeToken, rateLimit, rateLimitReset, STAFF_COOKIE, STUDENT_COOKIE } from "../auth";
 import { LIMITS } from "../constants";
 import { DEMO_ACCOUNTS, isDemoPassword, usesPrivateStaff } from "../seed";
 
@@ -42,6 +42,31 @@ route("GET", "/auth/me", (ctx) => {
   return { staff: ctx.auth.staff ?? null, student };
 });
 
+/* Staff change their own password. Other signed-in devices are signed out; this one stays signed in. */
+route("POST", "/auth/password", (ctx) => {
+  const staff = ctx.auth.staff;
+  if (!staff) throw new HttpError(401, "unauthenticated", "Please sign in.");
+  if (!rateLimit(`password:${staff.id}`, 8, 300000)) throw new HttpError(429, "rate_limited", "Too many attempts. Please wait a few minutes.");
+  const current = str(ctx.body?.currentPassword, LIMITS.passwordMax, "Current password");
+  const next = typeof ctx.body?.newPassword === "string" ? ctx.body.newPassword : "";
+  if (next.length < LIMITS.passwordMin) throw bad(`Your new password must be at least ${LIMITS.passwordMin} characters.`);
+  if (next.length > LIMITS.passwordMax) throw bad(`Your new password must be at most ${LIMITS.passwordMax} characters.`);
+  if (next !== next.trim()) throw bad("Your new password can’t start or end with a space.");
+  const u = get("SELECT password_hash FROM users WHERE id=?", staff.id);
+  if (!u || !verifyPassword(current, String(u.password_hash))) throw new HttpError(403, "wrong_password", "Your current password is incorrect.");
+  if (next === current) throw bad("Choose a new password that is different from your current one.");
+  if (isDemoPassword(next)) throw bad("Choose a private password, not a demo password.");
+  tx(() => {
+    run("UPDATE users SET password_hash=? WHERE id=?", hashPassword(next), staff.id);
+    run("DELETE FROM auth_tokens WHERE kind='staff' AND user_id=?", staff.id);
+  });
+  rateLimitReset(`password:${staff.id}`);
+  const { token, maxAge } = issueToken("staff", staff.id);
+  ctx.setCookie(STAFF_COOKIE, token, maxAge);
+  audit("staff", staff.id, "password.change");
+  return { ok: true };
+});
+
 route("GET", "/auth/demo-accounts", () => {
   if (usesPrivateStaff() || process.env.HIDE_DEMO_ACCOUNTS === "1") return { accounts: [] };
   return { accounts: DEMO_ACCOUNTS.map((a) => ({ role: a.role, name: a.name, email: a.email, password: a.password })) };
@@ -57,7 +82,7 @@ function findSession(code: string) {
 route("GET", "/join/:code", (ctx) => {
   if (!rateLimit(`joinlookup:${ctx.ip}`, 60, 300000)) throw new HttpError(429, "rate_limited", "Too many attempts. Please wait a moment.");
   const s = findSession(ctx.params.code);
-  const groups = all("SELECT g.id,g.name,g.pin,g.seat_cap,(SELECT COUNT(*) FROM students st WHERE st.group_id=g.id) AS n FROM groups g WHERE g.session_id=? ORDER BY g.id", num(s.id));
+  const groups = all("SELECT g.id,g.name,g.pin,g.seat_cap,(SELECT COUNT(*) FROM students st WHERE st.group_id=g.id AND st.unassigned=0) AS n FROM groups g WHERE g.session_id=? ORDER BY g.id", num(s.id));
   return {
     session: { title: s.title },
     groups: groups.map((g) => ({
@@ -97,9 +122,24 @@ route("POST", "/student/join", (ctx) => {
   if (current && nameKey(String(current.name), String(current.class), String(current.class_no)) === key) {
     return { student: studentState(num(current.id)), resumed: true };
   }
+  // A student the teacher added in advance goes straight to the group the teacher chose.
+  const reserved = all("SELECT id,group_id,name,class,class_no FROM students WHERE session_id=? AND placeholder=1 ORDER BY id", sid)
+    .find((row) => nameKey(String(row.name), String(row.class), String(row.class_no)) === key);
+  if (reserved) {
+    const grp = get("SELECT * FROM groups WHERE id=?", num(reserved.group_id))!;
+    if (grp.pin) {
+      if (!pin) throw new HttpError(403, "pin_required", `Your teacher has placed you in ${grp.name}. Enter its group PIN to continue.`);
+      if (!rateLimit(pinKey, 10, 300000)) throw new HttpError(429, "rate_limited", "Too many PIN attempts. Please wait a few minutes.");
+      if (pin !== String(grp.pin)) throw new HttpError(403, "wrong_pin", "That group PIN is not correct.");
+    }
+    run("UPDATE students SET placeholder=0, last_seen=? WHERE id=?", now(), num(reserved.id));
+    issueStudent(ctx, num(reserved.id));
+    audit("student", num(reserved.id), "join_reserved", `session:${sid}`);
+    return { student: studentState(num(reserved.id)), resumed: false, assignedByTeacher: true };
+  }
   if (b.resume === true) {
     const requestedGroup = Number(b.groupId);
-    const candidates = all("SELECT id,group_id,name,class,class_no FROM students WHERE session_id=?", sid)
+    const candidates = all("SELECT id,group_id,name,class,class_no FROM students WHERE session_id=? AND placeholder=0", sid)
       .filter((row) => nameKey(String(row.name), String(row.class), String(row.class_no)) === key &&
         (!Number.isInteger(requestedGroup) || requestedGroup <= 0 || num(row.group_id) === requestedGroup));
     if (!candidates.length) throw notFound("No existing work matches those details. Turn off recovery to join as a new student.");
@@ -131,7 +171,7 @@ route("POST", "/student/join", (ctx) => {
   }
 
   // New student: choose or be assigned a group.
-  const groups = all("SELECT g.*,(SELECT COUNT(*) FROM students st WHERE st.group_id=g.id) AS n FROM groups g WHERE g.session_id=? ORDER BY g.id", sid);
+  const groups = all("SELECT g.*,(SELECT COUNT(*) FROM students st WHERE st.group_id=g.id AND st.unassigned=0) AS n FROM groups g WHERE g.session_id=? ORDER BY g.id", sid);
   if (!groups.length) throw bad("This session has no groups yet. Ask your teacher.");
   let g;
   if (b.groupId === "auto" || b.groupId === undefined || b.groupId === null || b.groupId === "") {
@@ -147,7 +187,7 @@ route("POST", "/student/join", (ctx) => {
     if (pin !== String(g.pin)) throw new HttpError(403, "wrong_pin", "That group PIN is not correct.");
   }
   const id = tx(() => {
-    const n = num(get("SELECT COUNT(*) AS n FROM students WHERE group_id=?", num(g.id))!.n);
+    const n = num(get("SELECT COUNT(*) AS n FROM students WHERE group_id=? AND unassigned=0", num(g.id))!.n);
     if (g.seat_cap && n >= num(g.seat_cap)) throw forbidden("That group is full. Please choose another group.", "group_full");
     const studentKey = existing ? `${key}|${randomUUID()}` : key;
     return run("INSERT INTO students(session_id,group_id,name,class,class_no,name_key,last_seen,created_at) VALUES(?,?,?,?,?,?,?,?)", sid, num(g.id), name, cls, classNo, studentKey, now(), now()).id;

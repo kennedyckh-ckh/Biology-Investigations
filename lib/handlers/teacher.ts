@@ -1,12 +1,13 @@
 import { route, bad, forbidden, notFound, HttpError, str, int, partNo, safeLink, type Ctx } from "../router";
 import { all, get, run, tx, now, num, audit, type Row } from "../db";
 import { requireTeacher, ownSession, ownGroup, mustBeActive, submissionInfo, individualSubmissionInfo, onlineEditors } from "../authz";
-import { createSession, partConfig, setQuestions, activeGroupIds, entryTagsFor, designHintsFor, designHintsVisible, instructionBlocksFor, studentPart } from "../sessions";
+import { createSession, cloneSession, partConfig, setQuestions, activeGroupIds, entryTagsFor, designHintsFor, designHintsVisible, instructionBlocksFor, studentPart, saveTagHints, setTagHintsVisible, tagHintsFor, tagHintsVisible } from "../sessions";
 import { entriesWhere, deleteImageFile } from "../entries";
 import { classBoardFor, publishedShares, publishedAi, critiquePromptsOf, stageCritiquePrompts, reactionsFor } from "../sharing";
 import { LIMITS, PART_TITLES, ONLINE_WINDOW_MS, DEFAULT_CRITIQUE_PROMPTS, type InstructionBlock } from "../constants";
 import { randomUUID } from "node:crypto";
-import { attachmentInfo, attachmentRow, downloadInstructionFile, receiveInstructionFile, removeInstructionFile, uploadsInProgress } from "../instruction-files";
+import { attachmentInfo, attachmentRow, downloadExtraFile, downloadInstructionFile, extraInfo, extraRow, receiveInstructionFile, removeInstructionFile, uploadsInProgress, type ExtraKind } from "../instruction-files";
+import { revokeStudentTokens } from "../auth";
 
 /* ---------- Sessions list / create ---------- */
 route("GET", "/teacher/sessions", (ctx) => {
@@ -72,6 +73,15 @@ route("POST", "/teacher/sessions", (ctx) => {
   return { id };
 });
 
+route("POST", "/teacher/sessions/:id/clone", (ctx) => {
+  const t = requireTeacher(ctx);
+  const s = ownSession(ctx, ctx.params.id);
+  const title = str(ctx.body?.title, 150, "Session title");
+  const id = cloneSession(t.id, num(s.id), title);
+  audit("staff", t.id, "session.clone", `session:${num(s.id)}->session:${id}`);
+  return { id };
+});
+
 /* ---------- Session detail / settings ---------- */
 function sessionDetail(s: Row) {
   const sid = num(s.id);
@@ -90,14 +100,23 @@ function sessionDetail(s: Row) {
     pedagogyNotes: s.pedagogy_notes,
     source: s.source_template_id ? { templateId: num(s.source_template_id), title: src?.title ?? "(removed)", importedVersion: num(s.source_version), currentVersion: src ? num(src.version) : null } : null,
     parts: partConfig(sid),
-    groups: all("SELECT g.*,(SELECT COUNT(*) FROM students st WHERE st.group_id=g.id) AS n FROM groups g WHERE g.session_id=? ORDER BY g.id", sid).map((g) => ({
+    groups: all("SELECT g.*,(SELECT COUNT(*) FROM students st WHERE st.group_id=g.id AND st.unassigned=0) AS n FROM groups g WHERE g.session_id=? ORDER BY g.id", sid).map((g) => ({
       id: num(g.id),
       name: g.name,
       pin: g.pin ?? "",
       seatCap: g.seat_cap === null ? null : num(g.seat_cap),
       members: num(g.n),
+      students: rosterRows("s.group_id=? AND s.unassigned=0", num(g.id)),
     })),
+    unassigned: rosterRows("s.session_id=? AND s.unassigned=1", sid),
   };
+}
+
+function rosterRows(where: string, ...params: unknown[]) {
+  return all(`SELECT s.id,s.name,s.class,s.class_no,s.placeholder,s.group_id,(SELECT COUNT(*) FROM entries e WHERE e.student_id=s.id AND e.deleted_at IS NULL) AS entries FROM students s WHERE ${where} ORDER BY s.class, s.class_no, s.name`, ...params).map((r) => ({
+    id: num(r.id), name: String(r.name), class: String(r.class), classNo: String(r.class_no),
+    joined: !num(r.placeholder), entries: num(r.entries), groupId: num(r.group_id),
+  }));
 }
 
 route("GET", "/teacher/sessions/:id", (ctx) => sessionDetail(ownSession(ctx, ctx.params.id)));
@@ -108,8 +127,18 @@ route("PUT", "/teacher/sessions/:id/design-tag-hints/visibility", (ctx) => {
   const sid = num(s.id);
   const visible = ctx.body?.visible;
   if (typeof visible !== "boolean") throw bad("Choose whether to show the design tag hints.");
-  if (visible) run("INSERT OR IGNORE INTO design_hint_release(session_id) VALUES(?)", sid);
-  else run("DELETE FROM design_hint_release WHERE session_id=?", sid);
+  setTagHintsVisible(sid, 1, visible);
+  return { visible };
+});
+
+route("PUT", "/teacher/sessions/:id/parts/:n/tag-hints/visibility", (ctx) => {
+  const s = ownSession(ctx, ctx.params.id);
+  mustBeActive(s);
+  const part = partNo(ctx.params.n);
+  const visible = ctx.body?.visible;
+  if (typeof visible !== "boolean") throw bad("Choose whether to show the entry-tag hints.");
+  setTagHintsVisible(num(s.id), part, visible);
+  audit("staff", ctx.auth.staff!.id, visible ? "hints.show" : "hints.hide", `session:${num(s.id)}:part:${part}`);
   return { visible };
 });
 
@@ -156,16 +185,17 @@ function updateSessionSettings(ctx: Ctx) {
     } else if (next.length) promptsJson = JSON.stringify(next);
   }
   let hintsJson: string | undefined;
-  if ("designTagHints" in b) {
-    if (part !== undefined && part !== 1) throw bad("Design tag hints only apply to Part 1.");
-    if (!Array.isArray(b.designTagHints) || b.designTagHints.length > LIMITS.entryTagCount) throw bad(`Use up to ${LIMITS.entryTagCount} design tag hints.`);
-    const validTags = tags ?? entryTagsFor(sid, 1);
-    const next = (b.designTagHints as unknown[]).map((value) => {
-      if (!value || typeof value !== "object") throw bad("Invalid design tag hint.");
+  const hintPart = part ?? 1;
+  const rawHints = "tagHints" in b ? b.tagHints : "designTagHints" in b ? b.designTagHints : undefined;
+  if (rawHints !== undefined) {
+    if (!Array.isArray(rawHints) || rawHints.length > LIMITS.entryTagCount) throw bad(`Use up to ${LIMITS.entryTagCount} entry-tag hints.`);
+    const validTags = tags ?? entryTagsFor(sid, hintPart);
+    const next = (rawHints as unknown[]).map((value) => {
+      if (!value || typeof value !== "object") throw bad("Invalid entry-tag hint.");
       const hint = value as { tag?: unknown; hint?: unknown };
       const tag = str(hint.tag, LIMITS.entryTagMax, "Entry tag");
-      if (!validTags.includes(tag)) throw bad("Design hints must use a Part 1 entry tag.");
-      return { tag, hint: str(hint.hint, LIMITS.designHintMax, "Design hint", { optional: true }) };
+      if (!validTags.includes(tag)) throw bad(`Entry-tag hints must use a Part ${hintPart} entry tag.`);
+      return { tag, hint: str(hint.hint, LIMITS.designHintMax, "Entry-tag hint", { optional: true }) };
     });
     if (new Set(next.map((record) => record.tag)).size !== next.length) throw bad("Use one hint per tag.");
     hintsJson = JSON.stringify(next.filter((record) => record.hint));
@@ -183,7 +213,7 @@ function updateSessionSettings(ctx: Ctx) {
       if (promptsJson !== undefined) run("UPDATE sessions SET critique_prompts_json=? WHERE id=?", promptsJson, sid);
       if (tags !== undefined) run("INSERT INTO session_entry_tags(session_id,tags_json) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET tags_json=excluded.tags_json", sid, JSON.stringify(tags));
     }
-    if (hintsJson !== undefined) run("INSERT INTO design_tag_hints(session_id,hints_json) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET hints_json=excluded.hints_json", sid, hintsJson);
+    if (hintsJson !== undefined) saveTagHints(sid, hintPart, hintsJson);
     audit("staff", ctx.auth.staff!.id, part === undefined ? "session.update" : "stage.settings", `session:${sid}${part === undefined ? "" : `:part${part}`}`);
   });
   return sessionDetail(ownSession(ctx, sid));
@@ -238,6 +268,11 @@ route("PUT", "/teacher/sessions/:id/parts/:n", (ctx) => {
       for (const row of all("SELECT task_id,storage_name FROM task_instruction_attachments WHERE session_id=? AND part=?", sid, part)) {
         if (blocks.some((b) => b.id === row.task_id)) continue;
         run("DELETE FROM task_instruction_attachments WHERE session_id=? AND part=? AND task_id=?", sid, part, String(row.task_id));
+        removedFiles.push(String(row.storage_name));
+      }
+      for (const row of all("SELECT task_id,storage_name FROM extra_instruction_files WHERE session_id=? AND part=? AND kind='task_pdf'", sid, part)) {
+        if (blocks.some((b) => b.id === row.task_id)) continue;
+        run("DELETE FROM extra_instruction_files WHERE session_id=? AND part=? AND kind='task_pdf' AND task_id=?", sid, part, String(row.task_id));
         removedFiles.push(String(row.storage_name));
       }
     }
@@ -309,6 +344,60 @@ for (const path of [attachmentPath, taskAttachmentPath]) {
   route("DELETE", path, deleteInstructionAttachment);
 }
 
+/* Part-wide diagram (image) and per-task PDF. */
+const extraPaths: [string, ExtraKind][] = [["/teacher/sessions/:id/parts/:n/diagram", "part_diagram"], ["/teacher/sessions/:id/parts/:n/tasks/:taskId/pdf", "task_pdf"]];
+for (const [path, kind] of extraPaths) {
+  route("GET", path, (ctx) => {
+    const sid = num(ownSession(ctx, ctx.params.id).id);
+    return downloadExtraFile(extraRow(sid, partNo(ctx.params.n), kind, ctx.params.taskId ?? ""), kind);
+  });
+  route("PUT", path, async (ctx) => {
+    const s = ownSession(ctx, ctx.params.id);
+    mustBeActive(s);
+    const sid = num(s.id);
+    const part = partNo(ctx.params.n);
+    const taskId = ctx.params.taskId ?? "";
+    const assertTaskExists = () => {
+      if (kind === "task_pdf" && !instructionBlocksFor(sid, part).some((b) => b.id === taskId)) throw notFound("Save the task before attaching a PDF.");
+    };
+    assertTaskExists();
+    const key = `${sid}:${part}:${kind}:${taskId}`;
+    if (uploadsInProgress.has(key)) throw new HttpError(409, "upload_in_progress", "A file is already being uploaded here.");
+    uploadsInProgress.add(key);
+    try {
+      const file = await receiveInstructionFile(ctx.req, kind === "part_diagram", kind === "task_pdf");
+      try {
+        mustBeActive(ownSession(ctx, sid));
+        assertTaskExists();
+        const old = extraRow(sid, part, kind, taskId);
+        run(
+          "INSERT INTO extra_instruction_files(session_id,part,kind,task_id,storage_name,name,size) VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id,part,kind,task_id) DO UPDATE SET storage_name=excluded.storage_name,name=excluded.name,size=excluded.size",
+          sid, part, kind, taskId, file.storageName, file.name, file.size
+        );
+        if (old) removeInstructionFile(String(old.storage_name));
+      } catch (error) {
+        removeInstructionFile(file.storageName);
+        throw error;
+      }
+      return { attachment: extraInfo(sid, part, kind, `/api/teacher/sessions/${sid}`, taskId) };
+    } finally {
+      uploadsInProgress.delete(key);
+    }
+  }, { binary: true });
+  route("DELETE", path, (ctx) => {
+    const s = ownSession(ctx, ctx.params.id);
+    mustBeActive(s);
+    const sid = num(s.id);
+    const part = partNo(ctx.params.n);
+    const taskId = ctx.params.taskId ?? "";
+    if (uploadsInProgress.has(`${sid}:${part}:${kind}:${taskId}`)) throw new HttpError(409, "upload_in_progress", "Wait for the upload to finish before removing the file.");
+    const old = extraRow(sid, part, kind, taskId);
+    run("DELETE FROM extra_instruction_files WHERE session_id=? AND part=? AND kind=? AND task_id=?", sid, part, kind, taskId);
+    if (old) removeInstructionFile(String(old.storage_name));
+    return { attachment: null };
+  });
+}
+
 const previewPath = "/teacher/sessions/:id/student-view";
 route("GET", previewPath, (ctx) => {
   const s = ownSession(ctx, ctx.params.id);
@@ -330,6 +419,14 @@ for (const suffix of ["/parts/:n/attachment", "/parts/:n/tasks/:taskId/attachmen
     if (get("SELECT visibility FROM session_parts WHERE session_id=? AND part=?", sid, part)?.visibility !== "open") throw forbidden("This part is not open to students.");
     const taskId = ctx.params.taskId;
     return downloadInstructionFile(attachmentRow(sid, part, taskId), taskId !== undefined || ctx.query.get("preview") === "1");
+  });
+}
+for (const [suffix, kind] of [["/parts/:n/diagram", "part_diagram"], ["/parts/:n/tasks/:taskId/pdf", "task_pdf"]] as const) {
+  route("GET", `${previewPath}${suffix}`, (ctx) => {
+    const sid = num(ownSession(ctx, ctx.params.id).id);
+    const part = partNo(ctx.params.n);
+    if (get("SELECT visibility FROM session_parts WHERE session_id=? AND part=?", sid, part)?.visibility !== "open") throw forbidden("This part is not open to students.");
+    return downloadExtraFile(extraRow(sid, part, kind, ctx.params.taskId ?? ""), kind);
   });
 }
 
@@ -378,7 +475,7 @@ route("DELETE", "/teacher/sessions/:id", (ctx) => {
   if (s.status !== "archived") throw forbidden("Archive the session first; only archived sessions can be deleted.", "not_archived");
   if (ctx.body?.confirmTitle !== s.title) throw bad("Type the session title to confirm deletion.", "confirm_required");
   const files = all("SELECT image_file FROM entries WHERE session_id=? AND image_file IS NOT NULL", num(s.id));
-  const attachments = all("SELECT storage_name FROM instruction_attachments WHERE session_id=? UNION ALL SELECT storage_name FROM task_instruction_attachments WHERE session_id=?", num(s.id), num(s.id));
+  const attachments = all("SELECT storage_name FROM instruction_attachments WHERE session_id=? UNION ALL SELECT storage_name FROM task_instruction_attachments WHERE session_id=? UNION ALL SELECT storage_name FROM extra_instruction_files WHERE session_id=?", num(s.id), num(s.id), num(s.id));
   tx(() => run("DELETE FROM sessions WHERE id=?", num(s.id)));
   files.forEach((f) => deleteImageFile(String(f.image_file)));
   attachments.forEach((f) => removeInstructionFile(String(f.storage_name)));
@@ -411,7 +508,7 @@ route("PATCH", "/teacher/sessions/:id/groups/:gid", (ctx) => {
   mustBeActive(s);
   const g = ownGroup(s, ctx.params.gid);
   const f = groupFields({ name: g.name, pin: g.pin ?? "", seatCap: g.seat_cap, ...(ctx.body || {}) });
-  const members = num(get("SELECT COUNT(*) AS n FROM students WHERE group_id=?", num(g.id))!.n);
+  const members = num(get("SELECT COUNT(*) AS n FROM students WHERE group_id=? AND unassigned=0", num(g.id))!.n);
   if (f.cap !== null && f.cap < members) throw bad(`This group already has ${members} members, so the seat cap cannot be lower.`);
   run("UPDATE groups SET name=?, pin=?, seat_cap=? WHERE id=?", f.name, f.pin, f.cap, num(g.id));
   return { ok: true };
@@ -420,9 +517,74 @@ route("DELETE", "/teacher/sessions/:id/groups/:gid", (ctx) => {
   const s = ownSession(ctx, ctx.params.id);
   mustBeActive(s);
   const g = ownGroup(s, ctx.params.gid);
-  if (num(get("SELECT COUNT(*) AS n FROM students WHERE group_id=?", num(g.id))!.n) > 0) throw new HttpError(409, "group_has_students", "This group has students in it, so it cannot be removed.");
+  if (num(get("SELECT COUNT(*) AS n FROM students WHERE group_id=?", num(g.id))!.n) > 0) throw new HttpError(409, "group_has_students", "This group has students in it, or students who were removed from it still have work there, so it cannot be removed.");
   run("DELETE FROM groups WHERE id=?", num(g.id));
   return { ok: true };
+});
+
+/* ---------- Students in groups ---------- */
+function seatCheck(g: Row, exceptStudentId?: number) {
+  if (g.seat_cap === null || g.seat_cap === undefined) return;
+  const n = num(get("SELECT COUNT(*) AS n FROM students WHERE group_id=? AND unassigned=0 AND id<>?", num(g.id), exceptStudentId ?? 0)!.n);
+  if (n >= num(g.seat_cap)) throw new HttpError(409, "group_full", `${g.name} is full (seat cap ${num(g.seat_cap)}). Raise its seat cap or choose another group.`);
+}
+const rosterKey = (name: string, cls: string, no: string) => [name, cls, no].map((v) => v.trim().toLowerCase().replace(/\s+/g, " ")).join("|");
+
+/* Adds a student to a group before they join. When they join with the same name, class and class number, they go straight to this group. */
+route("POST", "/teacher/sessions/:id/students", (ctx) => {
+  const s = ownSession(ctx, ctx.params.id);
+  mustBeActive(s);
+  const sid = num(s.id);
+  const b = ctx.body || {};
+  const name = str(b.name, LIMITS.nameMax, "Name");
+  const cls = str(b.class, LIMITS.classMax, "Class");
+  const classNo = str(b.classNo, 10, "Class number");
+  const g = ownGroup(s, b.groupId);
+  const key = rosterKey(name, cls, classNo);
+  if (all("SELECT name,class,class_no FROM students WHERE session_id=?", sid).some((r) => rosterKey(String(r.name), String(r.class), String(r.class_no)) === key)) {
+    throw new HttpError(409, "student_exists", "A student with this name, class and class number is already in this session. Use Move to change their group.");
+  }
+  if (num(get("SELECT COUNT(*) AS n FROM students WHERE session_id=?", sid)!.n) >= 400) throw bad("At most 400 students per session.");
+  seatCheck(g);
+  const id = run("INSERT INTO students(session_id,group_id,name,class,class_no,name_key,last_seen,created_at,placeholder) VALUES(?,?,?,?,?,?,?,?,1)", sid, num(g.id), name, cls, classNo, key, 0, now()).id;
+  audit("staff", ctx.auth.staff!.id, "student.add", `session:${sid}:student:${id}`);
+  return { id };
+});
+
+/* Move a student to another group (groupId), or remove them from their group (groupId: null). Their earlier entries stay with the group they were written in. */
+route("PATCH", "/teacher/sessions/:id/students/:studentId", (ctx) => {
+  const s = ownSession(ctx, ctx.params.id);
+  mustBeActive(s);
+  const sid = num(s.id);
+  const st = get("SELECT * FROM students WHERE id=? AND session_id=?", int(ctx.params.studentId, "Student ID"), sid);
+  if (!st) throw notFound("Student not found in this session.");
+  const studentId = num(st.id);
+  const raw = ctx.body?.groupId;
+  tx(() => {
+    if (raw === null) {
+      run("UPDATE students SET unassigned=1 WHERE id=?", studentId);
+      run("DELETE FROM presence WHERE student_id=?", studentId);
+    } else {
+      const g = ownGroup(s, raw);
+      if (num(g.id) !== num(st.group_id) || num(st.unassigned)) seatCheck(g, studentId);
+      run("UPDATE students SET group_id=?, unassigned=0 WHERE id=?", num(g.id), studentId);
+      run("UPDATE presence SET group_id=?, editing_entry_id=NULL WHERE student_id=?", num(g.id), studentId);
+    }
+  });
+  audit("staff", ctx.auth.staff!.id, raw === null ? "student.unassign" : "student.move", `session:${sid}:student:${studentId}`);
+  return sessionDetail(ownSession(ctx, sid));
+});
+
+/* Only a student who was added by the teacher and has not joined yet can be deleted from the roster. */
+route("DELETE", "/teacher/sessions/:id/students/:studentId", (ctx) => {
+  const s = ownSession(ctx, ctx.params.id);
+  mustBeActive(s);
+  const st = get("SELECT * FROM students WHERE id=? AND session_id=?", int(ctx.params.studentId, "Student ID"), num(s.id));
+  if (!st) throw notFound("Student not found in this session.");
+  if (!num(st.placeholder)) throw new HttpError(409, "student_joined", "This student has already joined. Use Remove from group instead, so their work is kept.");
+  run("DELETE FROM students WHERE id=?", num(st.id));
+  revokeStudentTokens(num(st.id));
+  return sessionDetail(ownSession(ctx, num(s.id)));
 });
 
 /* ---------- Monitoring ---------- */
@@ -431,7 +593,7 @@ route("GET", "/teacher/sessions/:id/status", (ctx) => {
   const sid = num(s.id);
   const groups = all("SELECT * FROM groups WHERE session_id=? ORDER BY id", sid).map((g) => {
     const gid = num(g.id);
-    const members = all("SELECT s.id,s.name,s.class,s.class_no,p.last_beat,p.editing_entry_id FROM students s LEFT JOIN presence p ON p.student_id=s.id WHERE s.group_id=? ORDER BY s.name", gid).map((m) => ({
+    const members = all("SELECT s.id,s.name,s.class,s.class_no,s.placeholder,p.last_beat,p.editing_entry_id FROM students s LEFT JOIN presence p ON p.student_id=s.id WHERE s.group_id=? AND s.unassigned=0 AND s.placeholder=0 ORDER BY s.name", gid).map((m) => ({
       id: num(m.id),
       name: m.name,
       class: m.class,
@@ -458,7 +620,12 @@ route("GET", "/teacher/sessions/:id/status", (ctx) => {
   const overrides = all("SELECT part,reason,at,missing_groups_json FROM part_overrides WHERE session_id=? ORDER BY id DESC", sid).map((o) => ({ part: num(o.part), reason: o.reason, at: num(o.at), missing: JSON.parse(String(o.missing_groups_json)) }));
   const tags = entryTagsFor(sid, 1);
   const designHintCount = designHintsFor(sid).filter(({ tag }) => tags.includes(tag)).length;
-  return { status: s.status, designHintsVisible: designHintsVisible(sid), designHintCount, parts: partConfig(sid).map((p) => ({ part: p.part, title: PART_TITLES[p.part], visibility: p.visibility })), groups, summary, recovery, overrides };
+  const hints = [1, 2, 3].map((part) => {
+    const partTags = entryTagsFor(sid, part);
+    return { part, visible: tagHintsVisible(sid, part), count: tagHintsFor(sid, part).filter(({ tag, hint }) => partTags.includes(tag) && hint).length };
+  });
+  const unassigned = all("SELECT COUNT(*) AS n FROM students WHERE session_id=? AND unassigned=1", sid)[0];
+  return { status: s.status, designHintsVisible: designHintsVisible(sid), designHintCount, hints, unassignedCount: num(unassigned.n), parts: partConfig(sid).map((p) => ({ part: p.part, title: PART_TITLES[p.part], visibility: p.visibility })), groups, summary, recovery, overrides };
 });
 
 const individualPath = "/teacher/sessions/:id/students/:studentId/parts/:part/submission";
@@ -510,9 +677,44 @@ route("POST", "/teacher/sessions/:id/unlock-submission", (ctx) => {
   const part = partNo(ctx.body?.part);
   const info = submissionInfo(num(g.id), part);
   if (info.status !== "submitted") throw new HttpError(409, "not_submitted", "That group has no locked submission for this part.");
-  run("UPDATE part_submissions SET unlocked_at=?, unlocked_by=? WHERE group_id=? AND part=? AND revision=?", now(), ctx.auth.staff!.id, num(g.id), part, info.revision);
+  const reopened = tx(() => {
+    run("UPDATE part_submissions SET unlocked_at=?, unlocked_by=? WHERE group_id=? AND part=? AND revision=?", now(), ctx.auth.staff!.id, num(g.id), part, info.revision);
+    return ctx.body?.includeIndividual === false ? 0 : reopenIndividual("s.group_id=? AND s.unassigned=0", part, num(g.id));
+  });
   audit("staff", ctx.auth.staff!.id, "submission.unlock", `group:${num(g.id)}:part:${part}`);
-  return { ok: true };
+  return { ok: true, individualReopened: reopened };
+});
+
+/** Reopens the latest locked individual submission of each matching student for one part. */
+function reopenIndividual(where: string, part: number, ...params: unknown[]) {
+  let n = 0;
+  for (const st of all(`SELECT s.id FROM students s WHERE ${where}`, ...params)) {
+    const latest = individualSubmissionInfo(num(st.id), part);
+    if (latest.status !== "submitted") continue;
+    run("UPDATE individual_submissions SET unlocked_at=? WHERE student_id=? AND part=? AND revision=?", now(), num(st.id), part, latest.revision);
+    n++;
+  }
+  return n;
+}
+
+/* Unlock every locked group and individual submission for one part so students can revise and resubmit. */
+route("POST", "/teacher/sessions/:id/parts/:n/unlock-all", (ctx) => {
+  const s = ownSession(ctx, ctx.params.id);
+  mustBeActive(s);
+  const sid = num(s.id);
+  const part = partNo(ctx.params.n);
+  const result = tx(() => {
+    let groups = 0;
+    for (const g of all("SELECT id FROM groups WHERE session_id=?", sid)) {
+      const info = submissionInfo(num(g.id), part);
+      if (info.status !== "submitted") continue;
+      run("UPDATE part_submissions SET unlocked_at=?, unlocked_by=? WHERE group_id=? AND part=? AND revision=?", now(), ctx.auth.staff!.id, num(g.id), part, info.revision);
+      groups++;
+    }
+    return { groups, individual: reopenIndividual("s.session_id=?", part, sid) };
+  });
+  audit("staff", ctx.auth.staff!.id, "submission.unlock_all", `session:${sid}:part:${part}`);
+  return result;
 });
 
 route("POST", "/teacher/sessions/:id/recovery/:rid/approve", (ctx) => {
