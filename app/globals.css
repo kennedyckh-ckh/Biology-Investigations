@@ -82,6 +82,14 @@ body {
     linear-gradient(125deg, #102542 30%, #173b63 100%);
 }
 
+.cover-hero {
+  background-color: var(--color-blue-950);
+  background-image:
+    radial-gradient(ellipse 60% 70% at 85% 30%, rgba(65, 122, 188, .35), transparent 70%),
+    radial-gradient(ellipse 50% 60% at 5% 100%, rgba(47, 143, 107, .18), transparent 70%),
+    linear-gradient(135deg, #0d1f38 0%, #102542 45%, #173b63 100%);
+}
+
 @utility btn {
   @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50;
 }

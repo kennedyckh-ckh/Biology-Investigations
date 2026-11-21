@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/client/api";
 import { Field } from "@/components/ui";
 import { BrandLogo } from "@/components/brand-logo";
-import { partIcon, WorkspaceIcon } from "@/components/workspace-icon";
+import { WorkspaceIcon, type IconName } from "@/components/workspace-icon";
+import { DesignScene, EnactScene, HeroBackdrop, InquiryCycle, ReflectScene } from "@/components/cover-art";
 
 interface Me {
   staff: { id: number; role: "teacher" | "educator"; name: string } | null;
@@ -39,6 +40,12 @@ const INQUIRY_STAGES = [
   },
 ];
 
+const FEATURES: { icon: IconName; title: string; desc: string }[] = [
+  { icon: "groups", title: "Work in groups", desc: "Record plans, data and photos together in one group workspace." },
+  { icon: "share", title: "Share and critique", desc: "Post work to the class board for peer critique and reactions." },
+  { icon: "monitor", title: "Teacher-guided", desc: "Teachers open each part, follow progress and give feedback." },
+];
+
 export default function Home() {
   const [mode, setMode] = useState<"student" | "staff">("student");
   const [me, setMe] = useState<Me | null>(null);
@@ -49,6 +56,46 @@ export default function Home() {
       .catch(() => setMe({ staff: null, student: null }));
   }, []);
 
+  const access = (
+    <section aria-label="Platform access" className="w-full rounded-2xl border border-blue-200/70 bg-white px-5 pt-5 pb-6 text-slate-900 shadow-2xl shadow-blue-950/30 sm:px-7 sm:pt-6 sm:pb-7">
+      <p className="mb-3 flex items-center gap-2 text-xs font-semibold tracking-[0.13em] text-blue-800 uppercase"><WorkspaceIcon name="lock" /> Platform access</p>
+      <div className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 text-sm font-semibold" role="tablist" aria-label="Choose your role">
+        {(["student", "staff"] as const).map((m) => {
+          const active = mode === m;
+          return (
+            <button
+              key={m}
+              type="button"
+              role="tab"
+              id={`access-tab-${m}`}
+              aria-selected={active}
+              aria-controls={`access-panel-${m}`}
+              tabIndex={active ? 0 : -1}
+              onClick={() => setMode(m)}
+              onKeyDown={(e) => {
+                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+                e.preventDefault();
+                const next = e.key === "Home" ? "student" : e.key === "End" ? "staff" : mode === "student" ? "staff" : "student";
+                setMode(next);
+                document.getElementById(`access-tab-${next}`)?.focus();
+              }}
+              className={`flex min-h-11 items-center justify-center gap-2 rounded-md px-2 py-2 transition focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none ${active ? "bg-blue-800 text-white" : "text-slate-700 hover:bg-white"}`}
+            >
+              <WorkspaceIcon name={m === "student" ? "groups" : "monitor"} className="hidden h-4 w-4 min-[420px]:block" />
+              <span>{m === "student" ? "I’m a student" : "Teacher / Educator"}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div role="tabpanel" id="access-panel-student" aria-labelledby="access-tab-student" hidden={mode !== "student"}>
+        {mode === "student" && <StudentJoin />}
+      </div>
+      <div role="tabpanel" id="access-panel-staff" aria-labelledby="access-tab-staff" hidden={mode !== "staff"}>
+        {mode === "staff" && <StaffLogin />}
+      </div>
+    </section>
+  );
+
   return (
     <>
       <header className="platform-masthead">
@@ -57,107 +104,75 @@ export default function Home() {
           <p className="hidden border-l border-blue-600 pl-5 text-xs font-semibold tracking-wide text-blue-100 sm:block">Collaborative science inquiry platform</p>
         </div>
       </header>
-      <main className="mx-auto grid max-w-6xl items-start gap-5 px-4 pt-5 pb-12 sm:gap-6 sm:px-8 sm:pt-9 lg:grid-cols-[minmax(0,1.19fr)_minmax(0,0.92fr)] lg:gap-x-8 lg:pt-12">
-          <div className="inquiry-cover relative isolate overflow-hidden rounded-2xl px-5 pt-5 pb-6 text-white sm:px-8 sm:py-8 lg:col-start-1 lg:row-start-1 lg:px-9 lg:py-10">
-            <svg viewBox="0 0 300 235" aria-hidden="true" className="pointer-events-none absolute -right-4 -bottom-5 -z-10 h-auto w-48 text-blue-300/25 sm:w-72" fill="none" stroke="currentColor" strokeWidth="1.15">
-              <circle cx="200" cy="141" r="90" /><circle cx="200" cy="141" r="66" /><circle cx="200" cy="141" r="38" />
-              <path d="M89 141h207m-96-112v201M64 214l54-45 38 12 38-62 47 14 29-51" />
-              <circle cx="118" cy="169" r="4" fill="currentColor" /><circle cx="156" cy="181" r="4" fill="currentColor" /><circle cx="194" cy="119" r="4" fill="currentColor" /><circle cx="241" cy="133" r="4" fill="currentColor" /><circle cx="270" cy="82" r="4" fill="currentColor" />
-            </svg>
-            <p className="flex items-center gap-2 text-xs font-semibold tracking-[0.14em] text-blue-100 uppercase">
-              <WorkspaceIcon name="enact" /> Biology inquiry workspace
-            </p>
-            <h1 className="mt-2 max-w-[12ch] text-[2rem] leading-[1.09] font-bold tracking-tight text-white sm:mt-4 sm:text-[3.1rem]">Scientific Investigations</h1>
-            <p className="mt-2 max-w-[35ch] text-sm leading-relaxed text-blue-100 sm:mt-4 sm:text-base">
-              Plan an investigation, collect evidence, and use it to explain what you found.
-            </p>
-          </div>
-          <section aria-label="Platform access" className="w-full overflow-hidden rounded-2xl border border-blue-200 bg-white px-5 pt-5 pb-6 shadow-sm shadow-blue-950/10 sm:px-7 sm:pt-6 sm:pb-7 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-              <p className="mb-3 flex items-center gap-2 text-xs font-semibold tracking-[0.13em] text-blue-800 uppercase"><WorkspaceIcon name="lock" /> Platform access</p>
-              <div
-                className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 text-sm font-semibold"
-                role="tablist" aria-label="Choose your role"
-              >
-                {(["student", "staff"] as const).map((m) => {
-                  const active = mode === m;
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      role="tab"
-                      id={`access-tab-${m}`}
-                      aria-selected={active}
-                      aria-controls={`access-panel-${m}`}
-                      tabIndex={active ? 0 : -1}
-                      onClick={() => setMode(m)}
-                      onKeyDown={(e) => {
-                        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
-                        e.preventDefault();
-                        const next = e.key === "Home" ? "student" : e.key === "End" ? "staff" : mode === "student" ? "staff" : "student";
-                        setMode(next);
-                        document.getElementById(`access-tab-${next}`)?.focus();
-                      }}
-                      className={`flex min-h-11 items-center justify-center gap-2 rounded-md px-2 py-2 transition focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none ${
-                        active
-                          ? "bg-blue-800 text-white"
-                          : "text-slate-700 hover:bg-white"
-                      }`}
-                    >
-                      {m === "student" ? (
-                        <>
-                          <svg className="hidden h-4 w-4 shrink-0 min-[420px]:block" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                            <circle cx="9" cy="7" r="4" />
-                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                          </svg>
-                          <span>I’m a student</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="hidden h-4 w-4 shrink-0 min-[420px]:block" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="3" y="4" width="18" height="12" rx="2" />
-                            <path d="M2 20h20" />
-                            <path d="M12 16v4" />
-                          </svg>
-                          <span>Teacher / Educator</span>
-                        </>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div role="tabpanel" id="access-panel-student" aria-labelledby="access-tab-student" hidden={mode !== "student"}>
-                {mode === "student" && <StudentJoin />}
-              </div>
-              <div role="tabpanel" id="access-panel-staff" aria-labelledby="access-tab-staff" hidden={mode !== "staff"}>
-                {mode === "staff" && <StaffLogin />}
-              </div>
-          </section>
-          <div className="min-w-0 lg:col-start-1 lg:row-start-2">
-            {(me?.student?.sessionStatus === "active" || me?.staff) && (
-              <div className="mb-6 space-y-2">
-                {me?.student?.sessionStatus === "active" && <ContinueCard label={`Continue as ${me.student.name}`} sub={me.student.sessionTitle} badge="Active session" href="/student" />}
-                {me?.staff && <ContinueCard label={`Continue as ${me.staff.name}`} sub={me.staff.role === "teacher" ? "Teacher dashboard" : "Teacher Educator dashboard"} badge="Signed in" href={me.staff.role === "teacher" ? "/teacher" : "/educator"} />}
-              </div>
-            )}
-            <section aria-labelledby="inquiry-stages" className="rounded-2xl border border-blue-100 bg-white p-4 sm:p-5">
-              <h2 id="inquiry-stages" className="text-sm font-semibold tracking-wide text-blue-950">The investigation cycle</h2>
-              <ol className="mt-3 space-y-2">
-                {INQUIRY_STAGES.map((stage, i) => (
-                  <li key={stage.title} className="flex items-center gap-3 rounded-lg border border-blue-100 bg-blue-50/65 p-2.5">
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-white text-blue-700"><WorkspaceIcon name={partIcon(i + 1)} className="h-5 w-5" /></span>
-                    <div>
-                      <p className="text-sm font-semibold text-blue-950">{stage.title}</p>
-                      <p className="mt-0.5 text-xs leading-snug text-slate-600 sm:text-sm">{stage.desc}</p>
+      <main>
+        <div className="cover-hero relative isolate overflow-hidden text-white">
+          <HeroBackdrop className="pointer-events-none absolute inset-0 -z-10 h-full w-full text-blue-300/15" />
+          <div className="mx-auto grid max-w-6xl gap-x-14 gap-y-7 px-4 pt-8 pb-12 sm:px-8 sm:pt-12 lg:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] lg:pt-16 lg:pb-20">
+            <div className="min-w-0 lg:col-start-1 lg:row-start-1 lg:self-end">
+              <p className="inline-flex items-center gap-2 rounded-full border border-blue-400/40 bg-blue-900/60 px-3 py-1 text-xs font-semibold tracking-[0.12em] text-blue-100 uppercase">
+                <WorkspaceIcon name="enact" /> Biology inquiry workspace
+              </p>
+              <h1 className="mt-4 text-[2.35rem] leading-[1.04] font-bold tracking-tight text-white sm:text-[3.4rem] lg:text-[3.9rem]">
+                Scientific<br />Investigations
+              </h1>
+              <p className="mt-4 max-w-[38ch] text-base leading-relaxed text-blue-100 sm:text-lg">
+                Plan an investigation, collect evidence, and use it to explain what you found.
+              </p>
+            </div>
+            <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+              <ul className="grid gap-3 sm:grid-cols-3 lg:max-w-xl">
+                {FEATURES.map((f) => (
+                  <li key={f.title} className="flex gap-3 rounded-xl border border-blue-400/25 bg-white/[0.06] p-3.5 backdrop-blur-sm sm:block">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-100 text-blue-900"><WorkspaceIcon name={f.icon} className="h-5 w-5" /></span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-white sm:mt-2.5">{f.title}</p>
+                      <p className="mt-1 text-xs leading-relaxed text-blue-100">{f.desc}</p>
                     </div>
                   </li>
                 ))}
-              </ol>
-            </section>
+              </ul>
+              {(me?.student?.sessionStatus === "active" || me?.staff) && (
+                <div className="mt-6 space-y-2 lg:max-w-xl">
+                  {me?.student?.sessionStatus === "active" && <ContinueCard label={`Continue as ${me.student.name}`} sub={me.student.sessionTitle} badge="Active session" href="/student" />}
+                  {me?.staff && <ContinueCard label={`Continue as ${me.staff.name}`} sub={me.staff.role === "teacher" ? "Teacher dashboard" : "Teacher Educator dashboard"} badge="Signed in" href={me.staff.role === "teacher" ? "/teacher" : "/educator"} />}
+                </div>
+              )}
+            </div>
+            <div className="row-start-2 min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:w-full lg:max-w-md lg:self-center lg:justify-self-end">{access}</div>
           </div>
+        </div>
+
+        <section aria-labelledby="inquiry-stages" className="mx-auto grid max-w-6xl items-center gap-8 px-4 py-12 sm:px-8 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:gap-12 lg:py-16">
+          <div className="mx-auto w-full max-w-md lg:max-w-none">
+            <InquiryCycle className="h-auto w-full" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold tracking-[0.14em] text-blue-700 uppercase">How an investigation unfolds</p>
+            <h2 id="inquiry-stages" className="mt-2 text-2xl font-bold tracking-tight text-blue-950 sm:text-3xl">The investigation cycle</h2>
+            <p className="mt-2 max-w-[52ch] text-sm leading-relaxed text-slate-600 sm:text-base">
+              Each session has three parts. Your teacher opens them one at a time, and the evidence you gather links all three.
+            </p>
+            <ol className="mt-6 space-y-3">
+              {INQUIRY_STAGES.map((stage, i) => {
+                const Scene = [DesignScene, EnactScene, ReflectScene][i];
+                return (
+                  <li key={stage.title} className="flex items-center gap-4 rounded-2xl border border-blue-100 bg-white p-3 shadow-xs shadow-blue-950/5 sm:p-4">
+                    <span className="grid h-18 w-18 shrink-0 place-items-center rounded-xl bg-blue-50 sm:h-20 sm:w-20"><Scene className="h-15 w-15 sm:h-17 sm:w-17" /></span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold tracking-wide text-blue-700 uppercase">Part {i + 1}</p>
+                      <p className="text-base font-semibold text-blue-950">{stage.title}</p>
+                      <p className="mt-0.5 text-sm leading-snug text-slate-600">{stage.desc}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        </section>
       </main>
+      <footer className="border-t border-slate-200 bg-white">
+        <p className="mx-auto max-w-6xl px-4 py-5 text-xs text-slate-500 sm:px-8">Innovations in Biology Investigations · Scientific Investigations platform</p>
+      </footer>
     </>
   );
 }
