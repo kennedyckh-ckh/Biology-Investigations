@@ -17,43 +17,74 @@ export function newJoinCode(): string {
   throw new Error("Could not allocate join code");
 }
 
-/** Creates a session. If a template id is given it is COPIED: later edits never touch the master. */
+/** Creates a blank session, or imports a template by COPYING its design session: later edits never touch the master. */
 export function createSession(teacherId: number, title: string, templateId?: number): number {
+  if (templateId) {
+    const tpl = get("SELECT * FROM templates WHERE id=?", templateId)!;
+    const designId = ensureDesignSession(templateId);
+    return copySessionDesign(designId, teacherId, title, {
+      sourceTemplateId: num(tpl.id), sourceVersion: num(tpl.version),
+      pedagogyNotes: String(tpl.pedagogy_notes), aiCriteria: String(tpl.ai_criteria),
+    });
+  }
   return tx(() => {
-    const tpl = templateId ? get("SELECT * FROM templates WHERE id=?", templateId) : undefined;
     const sid = run(
-      "INSERT INTO sessions(teacher_id,title,join_code,status,source_template_id,source_version,pedagogy_notes,critique_prompts_json,ai_criteria,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-      teacherId,
-      title,
-      newJoinCode(),
-      "active",
-      tpl ? num(tpl.id) : null,
-      tpl ? num(tpl.version) : null,
-      tpl ? String(tpl.pedagogy_notes) : "",
-      JSON.stringify(DEFAULT_CRITIQUE_PROMPTS),
-      tpl ? String(tpl.ai_criteria) : "",
-      now()
+      "INSERT INTO sessions(teacher_id,title,join_code,status,critique_prompts_json,ai_criteria,created_at) VALUES(?,?,?,?,?,?,?)",
+      teacherId, title, newJoinCode(), "active", JSON.stringify(DEFAULT_CRITIQUE_PROMPTS), "", now()
     ).id;
     for (const part of [1, 2, 3]) {
-      const tp = tpl ? get("SELECT * FROM template_parts WHERE template_id=? AND part=?", num(tpl.id), part) : undefined;
-      run(
-        "INSERT INTO session_parts(session_id,part,instructions,web_link,visibility) VALUES(?,?,?,?,?)",
-        sid,
-        part,
-        tp ? String(tp.instructions) : "",
-        tp ? String(tp.web_link) : "",
-        part === 1 ? "open" : "visible"
-      );
-      if (tpl) {
-        for (const q of all("SELECT text,position FROM template_questions WHERE template_id=? AND part=? ORDER BY position", num(tpl.id), part)) {
-          run("INSERT INTO session_questions(session_id,part,position,text) VALUES(?,?,?,?)", sid, part, num(q.position), String(q.text));
-        }
-      }
+      run("INSERT INTO session_parts(session_id,part,instructions,web_link,visibility) VALUES(?,?,?,?,?)", sid, part, "", "", part === 1 ? "open" : "visible");
     }
     run("INSERT INTO groups(session_id,name) VALUES(?,?)", sid, "Group A");
     run("INSERT INTO groups(session_id,name) VALUES(?,?)", sid, "Group B");
     return sid;
   });
+}
+
+/**
+ * Every template has a hidden design session owned by its Teacher Educator. The educator edits it with the same
+ * Setup editor teachers use (tasks, formatting, files, stage settings); students can never join it.
+ * Templates saved before this existed are converted on first use from their old part text and questions.
+ */
+export function ensureDesignSession(templateId: number): number {
+  const tpl = get("SELECT * FROM templates WHERE id=?", templateId);
+  if (!tpl) throw new Error("Template not found");
+  if (tpl.design_session_id != null && get("SELECT 1 FROM sessions WHERE id=? AND template_design=1", num(tpl.design_session_id))) return num(tpl.design_session_id);
+  const create = () => {
+    const sid = run(
+      "INSERT INTO sessions(teacher_id,title,join_code,status,critique_prompts_json,ai_criteria,created_at,template_design) VALUES(?,?,?,?,?,?,?,1)",
+      num(tpl.educator_id), String(tpl.title), newJoinCode(), "active", JSON.stringify(DEFAULT_CRITIQUE_PROMPTS), String(tpl.ai_criteria), now()
+    ).id;
+    for (const part of [1, 2, 3]) {
+      const tp = get("SELECT * FROM template_parts WHERE template_id=? AND part=?", templateId, part);
+      run("INSERT INTO session_parts(session_id,part,instructions,web_link,visibility) VALUES(?,?,?,?,?)", sid, part, tp ? String(tp.instructions) : "", tp ? String(tp.web_link) : "", part === 1 ? "open" : "visible");
+      for (const q of all("SELECT text,position FROM template_questions WHERE template_id=? AND part=? ORDER BY position", templateId, part)) {
+        run("INSERT INTO session_questions(session_id,part,position,text) VALUES(?,?,?,?)", sid, part, num(q.position), String(q.text));
+      }
+    }
+    run("INSERT INTO groups(session_id,name) VALUES(?,?)", sid, "Group A");
+    run("INSERT INTO groups(session_id,name) VALUES(?,?)", sid, "Group B");
+    run("UPDATE templates SET design_session_id=? WHERE id=?", sid, templateId);
+    return sid;
+  };
+  return tx(create);
+}
+
+/** The template whose design session this is, if any. */
+export function templateForDesignSession(sessionId: number) {
+  return get("SELECT t.* FROM templates t JOIN sessions s ON s.id=t.design_session_id WHERE s.id=? AND s.template_design=1", sessionId);
+}
+
+/** Edits to a design session are edits to the master template, so teachers can see a newer version exists. */
+export function touchDesignTemplate(sessionId: number) {
+  run("UPDATE templates SET version=version+1, updated_at=? WHERE design_session_id=? AND EXISTS(SELECT 1 FROM sessions s WHERE s.id=? AND s.template_design=1)", now(), sessionId, sessionId);
+}
+
+/** Removes a template's design session and its stored instruction files. */
+export function deleteDesignSession(sessionId: number) {
+  const files = all("SELECT storage_name FROM instruction_attachments WHERE session_id=? UNION ALL SELECT storage_name FROM task_instruction_attachments WHERE session_id=? UNION ALL SELECT storage_name FROM extra_instruction_files WHERE session_id=?", sessionId, sessionId, sessionId);
+  run("DELETE FROM sessions WHERE id=? AND template_design=1", sessionId);
+  files.forEach((f) => removeInstructionFile(String(f.storage_name)));
 }
 
 export function questionsFor(sessionId: number, part: number): { id: number; text: string }[] {
@@ -165,6 +196,18 @@ const INSTRUCTION_DIR = path.join(UPLOAD_DIR, "instructions");
  * Students, entries, submissions, shares and AI drafts are never copied. Hints start hidden and Part 1 starts open.
  */
 export function cloneSession(teacherId: number, sourceId: number, title: string): number {
+  const src = get("SELECT * FROM sessions WHERE id=? AND teacher_id=?", sourceId, teacherId)!;
+  return copySessionDesign(sourceId, teacherId, title, {
+    sourceTemplateId: src.source_template_id == null ? null : num(src.source_template_id),
+    sourceVersion: src.source_version == null ? null : num(src.source_version),
+    pedagogyNotes: String(src.pedagogy_notes), aiCriteria: String(src.ai_criteria),
+  });
+}
+
+interface CopyOrigin { sourceTemplateId: number | null; sourceVersion: number | null; pedagogyNotes: string; aiCriteria: string }
+
+/** Copies a session's design (a teacher's session or a template's design session) into a new session for a teacher. */
+function copySessionDesign(sourceId: number, teacherId: number, title: string, origin: CopyOrigin): number {
   const copied: string[] = [];
   const copyFile = (storageName: unknown): string | null => {
     const next = crypto.randomUUID();
@@ -180,11 +223,11 @@ export function cloneSession(teacherId: number, sourceId: number, title: string)
   };
   try {
     return tx(() => {
-      const src = get("SELECT * FROM sessions WHERE id=? AND teacher_id=?", sourceId, teacherId)!;
+      const src = get("SELECT * FROM sessions WHERE id=?", sourceId)!;
       const sid = run(
         "INSERT INTO sessions(teacher_id,title,join_code,status,source_template_id,source_version,pedagogy_notes,anonymise_sharing,critique_prompts_json,ai_criteria,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-        teacherId, title, newJoinCode(), "active", src.source_template_id ?? null, src.source_version ?? null,
-        String(src.pedagogy_notes), num(src.anonymise_sharing), String(src.critique_prompts_json), String(src.ai_criteria), now()
+        teacherId, title, newJoinCode(), "active", origin.sourceTemplateId, origin.sourceVersion,
+        origin.pedagogyNotes, num(src.anonymise_sharing), String(src.critique_prompts_json), origin.aiCriteria, now()
       ).id;
       for (const p of all("SELECT * FROM session_parts WHERE session_id=? ORDER BY part", sourceId)) {
         run("INSERT INTO session_parts(session_id,part,instructions,web_link,visibility) VALUES(?,?,?,?,?)", sid, num(p.part), String(p.instructions), String(p.web_link), num(p.part) === 1 ? "open" : "visible");

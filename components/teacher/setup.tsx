@@ -24,12 +24,22 @@ export function Setup({ session, onSaved }: { session: SessionDetail; onSaved: (
         </div>
       )}
       <SessionSettings session={session} onSaved={onSaved} disabled={archived} />
-      {session.parts.map((p) => (
-        <PartEditor key={p.part} sessionId={session.id} cfg={p} onSaved={onSaved} disabled={archived}
-          stageSettings={<StageSettings session={session} cfg={p} onSaved={onSaved} disabled={archived} />} />
-      ))}
+      <PartsSetup session={session} onSaved={onSaved} disabled={archived} />
     </div>
   );
+}
+
+/**
+ * The part, task and stage-settings editors. Teachers use them in a session's Setup tab; Teacher Educators use the
+ * same editors on a template (its hidden design session), so both see exactly the same task instruction tools.
+ */
+export function PartsSetup({ session, onSaved, disabled = false, forTemplate = false }: { session: SessionDetail; onSaved: () => void; disabled?: boolean; forTemplate?: boolean }) {
+  return <>
+    {session.parts.map((p) => (
+      <PartEditor key={p.part} sessionId={session.id} cfg={p} onSaved={onSaved} disabled={disabled}
+        stageSettings={<StageSettings session={session} cfg={p} onSaved={onSaved} disabled={disabled} forTemplate={forTemplate} />} />
+    ))}
+  </>;
 }
 
 function SessionSettings({ session, onSaved, disabled }: { session: SessionDetail; onSaved: () => void; disabled: boolean }) {
@@ -61,7 +71,7 @@ function SessionSettings({ session, onSaved, disabled }: { session: SessionDetai
   </section>;
 }
 
-function StageSettings({ session, cfg, onSaved, disabled }: { session: SessionDetail; cfg: PartCfg; onSaved: () => void; disabled: boolean }) {
+function StageSettings({ session, cfg, onSaved, disabled, forTemplate }: { session: SessionDetail; cfg: PartCfg; onSaved: () => void; disabled: boolean; forTemplate: boolean }) {
   const toast = useToast();
   const [prompts, setPrompts] = useState(cfg.critiquePrompts);
   const [tags, setTags] = useState(cfg.entryTags.join("\n"));
@@ -148,7 +158,7 @@ function StageSettings({ session, cfg, onSaved, disabled }: { session: SessionDe
       <details className="rounded-lg border border-blue-100 bg-white p-3">
         <summary className="cursor-pointer text-sm font-semibold text-blue-900">{cfg.part === 1 ? "Design entry-tag hints" : `Part ${cfg.part} entry-tag hints`}</summary>
         <div className="mt-3 space-y-3">
-          <p className="text-sm text-slate-600">Write a short definition, example or question, then save your settings. {cfg.tagHintsVisible ? `Hints are released. Students can open them while Part ${cfg.part} is open. To hide them, go to Live monitor.` : `To release the saved hints, click “Show Part ${cfg.part} hints” in Live monitor.`}</p>
+          <p className="text-sm text-slate-600">Write a short definition, example or question, then save your settings. {forTemplate ? `Hints are copied to each teacher's session and stay hidden until the teacher releases them in Live monitor.` : cfg.tagHintsVisible ? `Hints are released. Students can open them while Part ${cfg.part} is open. To hide them, go to Live monitor.` : `To release the saved hints, click “Show Part ${cfg.part} hints” in Live monitor.`}</p>
           {activeHintTag ? (
             <>
               <Field label="Choose a tag">

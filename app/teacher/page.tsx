@@ -5,6 +5,8 @@ import Link from "next/link";
 import { api, usePoll, fmtTime, ApiError } from "@/lib/client/api";
 import { StaffShell } from "@/components/staff-shell";
 import { Spinner, ErrorBox, Empty, Modal, Field, useToast } from "@/components/ui";
+import { RichText } from "@/components/rich-text";
+import { PART_TITLES } from "@/lib/constants";
 
 interface SessionRow {
   id: number;
@@ -26,7 +28,10 @@ interface Assigned {
   refLinks: { label: string; url: string }[];
   educator: string;
   assignedAt: number;
-  parts: { part: number; instructions: string; webLink: string; questions: string[] }[];
+  parts: {
+    part: number; instructions: string; webLink: string; questions: string[]; hasDiagram: boolean; hasFile: boolean;
+    tasks: { title: string; text: string; questions: string[]; webLink: string; hasDiagram: boolean; hasPdf: boolean }[];
+  }[];
 }
 
 export default function TeacherHome() {
@@ -129,7 +134,7 @@ function Dashboard() {
             <Field label="Session title">
               <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={150} autoFocus placeholder="e.g. Year 8 – Period 3" />
             </Field>
-            {creating.assignment && <p className="text-sm text-slate-600">Instructions, links and guiding questions are copied into your session. You can edit all of them.</p>}
+            {creating.assignment && <p className="text-sm text-slate-600">Task instructions, guiding questions, links, diagrams, PDFs, files and stage settings are copied into your session. You can edit all of them.</p>}
             <div className="flex justify-end gap-2">
               <button className="btn-ghost" onClick={() => setCreating(null)}>
                 Cancel
@@ -151,15 +156,24 @@ function Dashboard() {
               </div>
             )}
             {view.parts.map((p) => (
-              <div key={p.part}>
-                <h4 className="font-bold">Part {p.part}</h4>
-                <p className="whitespace-pre-wrap text-slate-700">{p.instructions || <i>(none)</i>}</p>
-                {p.webLink && <p className="text-blue-700">{p.webLink}</p>}
-                <ol className="mt-1 list-decimal pl-5 text-slate-700">
-                  {p.questions.map((q, i) => (
-                    <li key={i}>{q}</li>
-                  ))}
-                </ol>
+              <div key={p.part} className="space-y-2">
+                <h4 className="font-bold">{PART_TITLES[p.part]}</h4>
+                {p.instructions ? <RichText text={p.instructions} className="text-slate-700" /> : !p.tasks.length && <p className="text-slate-500">No instructions yet.</p>}
+                {p.webLink && <p className="break-all text-blue-700">{p.webLink}</p>}
+                {(p.hasDiagram || p.hasFile) && <p className="text-xs text-slate-500">Shared part resources: {[p.hasDiagram && "diagram", p.hasFile && "file"].filter(Boolean).join(" and ")}</p>}
+                {p.tasks.length > 0 && (
+                  <ol className="space-y-2">
+                    {p.tasks.map((t, i) => (
+                      <li key={i} className="rounded-lg border border-slate-200 p-3">
+                        <p className="font-semibold">Task {i + 1}{t.title ? `: ${t.title}` : ""}</p>
+                        <RichText text={t.text} className="mt-1 text-slate-700" />
+                        {t.questions.length > 0 && <ol className="mt-1 list-decimal pl-5 text-slate-700">{t.questions.map((q, k) => <li key={k}>{q}</li>)}</ol>}
+                        {(t.webLink || t.hasDiagram || t.hasPdf) && <p className="mt-1 text-xs text-slate-500">Includes {[t.webLink && "a link", t.hasDiagram && "a diagram", t.hasPdf && "a PDF"].filter(Boolean).join(", ")}</p>}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {p.questions.length > 0 && <ol className="list-decimal pl-5 text-slate-700">{p.questions.map((q, i) => <li key={i}>{q}</li>)}</ol>}
               </div>
             ))}
           </div>

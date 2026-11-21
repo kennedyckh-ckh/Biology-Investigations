@@ -24,6 +24,20 @@ export function ownSession(ctx: Ctx, rawId: string | number): Row {
   if (!s) throw notFound("Session not found");
   return s;
 }
+/**
+ * Session whose instructions and stage settings this user may edit: a teacher's own session, or the hidden design
+ * session of a template the Teacher Educator owns. Live classroom routes keep using ownSession.
+ */
+export function ownSetupSession(ctx: Ctx, rawId: string | number): Row {
+  const u = ctx.auth.staff;
+  if (u?.role !== "educator") return ownSession(ctx, rawId);
+  const id = Number(rawId);
+  const s = Number.isInteger(id)
+    ? get("SELECT s.* FROM sessions s JOIN templates t ON t.design_session_id=s.id WHERE s.id=? AND s.template_design=1 AND t.educator_id=?", id, u.id)
+    : undefined;
+  if (!s) throw forbidden("Teacher account required.");
+  return s;
+}
 export function ownGroup(session: Row, rawId: string | number): Row {
   const g = get("SELECT * FROM groups WHERE id=? AND session_id=?", Number(rawId), num(session.id));
   if (!g) throw notFound("Group not found");

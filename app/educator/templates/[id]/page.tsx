@@ -3,14 +3,10 @@ import { use, useEffect, useState } from "react";
 import { api, usePoll, fmtTime, ApiError } from "@/lib/client/api";
 import { StaffShell } from "@/components/staff-shell";
 import { Spinner, ErrorBox, Field, useToast } from "@/components/ui";
-import { PART_TITLES } from "@/lib/constants";
+import { PartsSetup } from "@/components/teacher/setup";
+import { WorkspaceHeading } from "@/components/workspace-icon";
+import type { SessionDetail } from "@/components/teacher/types";
 
-interface PartT {
-  part: number;
-  instructions: string;
-  webLink: string;
-  questions: string[];
-}
 interface Detail {
   id: number;
   title: string;
@@ -18,7 +14,7 @@ interface Detail {
   aiCriteria: string;
   version: number;
   updatedAt: number;
-  parts: PartT[];
+  designSessionId: number;
   assignments: { id: number; teacherId: number; teacher: string; email: string; note: string; refLinks: { label: string; url: string }[]; assignedAt: number }[];
 }
 
@@ -42,12 +38,11 @@ function Editor({ id }: { id: string }) {
   if (!f) return <div className="mx-auto max-w-lg p-8"><ErrorBox message={error?.message || "Template not found"} onRetry={refresh} /></div>;
 
   const upd = (patch: Partial<Detail>) => { setF({ ...f, ...patch }); setDirty(true); };
-  const updPart = (i: number, patch: Partial<PartT>) => upd({ parts: f.parts.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
 
   async function save() {
     setBusy(true);
     try {
-      await api("PUT", `/educator/templates/${id}`, { title: f!.title, pedagogyNotes: f!.pedagogyNotes, aiCriteria: f!.aiCriteria, parts: f!.parts });
+      await api("PUT", `/educator/templates/${id}`, { title: f!.title, pedagogyNotes: f!.pedagogyNotes, aiCriteria: f!.aiCriteria });
       setDirty(false);
       toast("Template saved");
       refresh();
@@ -64,9 +59,10 @@ function Editor({ id }: { id: string }) {
         <div>
           <h1 className="text-2xl font-extrabold">Edit template</h1>
           <p className="text-sm text-slate-500">Version {f.version} · last saved {fmtTime(f.updatedAt)}. Teachers import a <b>copy</b>, so later edits never change sessions already running.</p>
+          <p className="mt-1 text-sm text-slate-500">Each part below uses the same editor teachers see in Setup. Save each part separately; files upload straight away.</p>
         </div>
         <button className="btn-primary" disabled={busy || !dirty} onClick={save}>
-          {busy ? "Saving…" : dirty ? "Save template" : "Saved ✓"}
+          {busy ? "Saving…" : dirty ? "Save template details" : "Saved ✓"}
         </button>
       </div>
 
@@ -82,36 +78,23 @@ function Editor({ id }: { id: string }) {
         </Field>
       </section>
 
-      {f.parts.map((p, i) => (
-        <section key={p.part} className="card space-y-4">
-          <h2 className="text-lg font-bold">{PART_TITLES[p.part]}</h2>
-          <Field label="Pre-populated instructions">
-            <textarea className="input min-h-[90px]" value={p.instructions} onChange={(e) => updPart(i, { instructions: e.target.value })} maxLength={5000} />
-          </Field>
-          <Field label="External web link">
-            <input className="input" value={p.webLink} onChange={(e) => updPart(i, { webLink: e.target.value })} placeholder="https://…" maxLength={500} />
-          </Field>
-          <div>
-            <span className="label">Guiding questions</span>
-            <ol className="space-y-2">
-              {p.questions.map((q, qi) => (
-                <li key={qi} className="flex gap-2">
-                  <input className="input" value={q} maxLength={500} aria-label={`Part ${p.part} question ${qi + 1}`} onChange={(e) => updPart(i, { questions: p.questions.map((x, k) => (k === qi ? e.target.value : x)) })} />
-                  <button className="btn-ghost btn-sm text-rose-700" aria-label="Remove question" onClick={() => updPart(i, { questions: p.questions.filter((_, k) => k !== qi) })}>
-                    ✕
-                  </button>
-                </li>
-              ))}
-            </ol>
-            <button className="btn-ghost btn-sm mt-2" disabled={p.questions.length >= 20} onClick={() => updPart(i, { questions: [...p.questions, ""] })}>
-              + Add question
-            </button>
-          </div>
-        </section>
-      ))}
+      <DesignParts sessionId={f.designSessionId} onSaved={refresh} />
 
       <Assign templateId={id} detail={f} dirty={dirty} teachers={teachers.data?.teachers ?? []} onChanged={refresh} />
     </main>
+  );
+}
+
+/** The template's parts and tasks, edited with the teacher Setup editors on the template's design session. */
+function DesignParts({ sessionId, onSaved }: { sessionId: number; onSaved: () => void }) {
+  const { data, error, loading, refresh } = usePoll<SessionDetail>(`/teacher/sessions/${sessionId}`, 0);
+  if (loading && !data) return <Spinner />;
+  if (!data) return <ErrorBox message={error?.message || "Could not load the template parts."} onRetry={refresh} />;
+  return (
+    <div className="space-y-6">
+      <WorkspaceHeading icon="task">Parts and task instructions</WorkspaceHeading>
+      <PartsSetup session={data} forTemplate onSaved={async () => { await refresh(); onSaved(); }} />
+    </div>
   );
 }
 
